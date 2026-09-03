@@ -46,7 +46,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from functools import cache
-from typing import Any, Final, cast
+from typing import Any, ClassVar, Final, cast
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured
@@ -56,6 +56,7 @@ from django.test.signals import setting_changed
 from rest_framework import serializers
 
 from dynamic_user import conf, resolution
+from dynamic_user.models import AccountDeletionRequest
 
 #: Never included in any serializer this factory builds, unconditionally — no per-call opt-out,
 #: no alias/`source=` trick around it (see :func:`_build_serializer`'s deny-list check below).
@@ -417,3 +418,44 @@ def get_admin_setting_serializer() -> type[serializers.ModelSerializer[Any]]:
     full-fields build, not ``SETTING_EDITABLE_FIELDS``."""
     model = resolution.get_setting_model()
     return build_serializer(model, _full_field_names(model))
+
+
+# ------------------------------------------------------------------------------ deletion request
+
+
+class DeletionRequestCreateSerializer(serializers.ModelSerializer[AccountDeletionRequest]):
+    """``POST /me/deletion-request/``'s request body — the only field a caller may supply.
+
+    ``AccountDeletionRequest`` isn't swappable (``docs/CONTRACT.md`` §1), and this shape isn't a
+    settings-driven allowlist surface, so it's hand-written with an explicit field list rather
+    than routed through :func:`build_serializer` — exactly the case this module's own docstring
+    and the Phase 5 guide call out.
+    """
+
+    class Meta:
+        model = AccountDeletionRequest
+        fields: ClassVar[list[str]] = ["reason"]
+        extra_kwargs: ClassVar[dict[str, dict[str, Any]]] = {
+            "reason": {"required": False, "allow_blank": True}
+        }
+
+
+class DeletionRequestSerializer(serializers.ModelSerializer[AccountDeletionRequest]):
+    """``GET``/``POST`` responses on ``/me/deletion-request/`` — entirely read-only.
+
+    Deliberately excludes ``user`` (redundant — the caller already knows who they are) and
+    ``reviewed_by`` — never expose ``reviewed_by`` on any user-facing serializer, per this
+    package's own rules and the Phase 5 guide.
+    """
+
+    class Meta:
+        model = AccountDeletionRequest
+        fields: ClassVar[list[str]] = [
+            "id",
+            "status",
+            "reason",
+            "requested_at",
+            "reviewed_at",
+            "finalize_at",
+        ]
+        read_only_fields = fields

@@ -3,8 +3,8 @@
 # Docker and uv. Mirrors ../appkit's and ../cleanup_app's Makefiles. See CLAUDE.md's Commands
 # block for the equivalent raw commands.
 
-.PHONY: test test-bare lint typecheck frontend-check check sync-readmes docs-link messages \
-	compilemessages playground-up playground-down playground-logs playground-reset
+.PHONY: test test-swapped test-bare lint typecheck frontend-check check sync-readmes docs-link \
+	messages compilemessages playground-up playground-down playground-logs playground-reset
 
 # The authoritative gate — celery extra installed, >=85% coverage (this repo's CLAUDE.md
 # Commands table). Port 55434, not cleanup_app's 55433 — the two ephemeral Postgres instances
@@ -16,6 +16,23 @@ test:
 	POSTGRES_HOST=localhost POSTGRES_PORT=55434 \
 	POSTGRES_DB=test_dynamic_user POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres \
 	uv run --extra celery pytest)
+
+# The fully-swapped leg (this repo's CLAUDE.md Commands table) — proves the swap machinery works
+# against tests.backend.settings_swapped's real subclasses, not just the default models. Same
+# ephemeral Postgres as `test`; `-k swapped` narrows collection to the swapped-leg test modules
+# (each carries its own DJANGO_SETTINGS_MODULE skipif guard as the correctness backstop).
+# `--no-cov`: this leg exercises only the swap-specific slice of the codebase by design (the
+# DEFAULT leg's own `make test` is the sole >=85% coverage gate, per CLAUDE.md's Commands table)
+# — the global --cov-fail-under=85 in addopts would otherwise fail this leg on every green run,
+# a pre-existing property of the raw command this target wraps, not something narrower collection
+# could fix.
+test-swapped:
+	docker compose -f docker-compose.test.yml up -d --wait
+	trap 'docker compose -f docker-compose.test.yml down' EXIT; \
+	(cd backend && \
+	POSTGRES_HOST=localhost POSTGRES_PORT=55434 \
+	POSTGRES_DB=test_dynamic_user POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres \
+	DJANGO_SETTINGS_MODULE=tests.backend.settings_swapped uv run --extra celery pytest -k swapped --no-cov)
 
 # The bare-install leg — no celery extra, no avatar extra, proves the core stands alone.
 # `--exact` matters: it removes celery/django-celery-beat/appkit[images] if a prior `make test`

@@ -4,13 +4,15 @@ Lives in the test tree, not the package — the package must never contain a set
 (``APP-DESIGN.md`` §7.1). Kept deliberately minimal: if this app's tests only pass with extra
 apps installed, it has an undeclared dependency on host configuration.
 
-**``appkit`` is deliberately NOT in ``INSTALLED_APPS`` here.** Nothing built so far
-(``models.py``, ``mixins.py``, ``validators.py``, the ``DeletionService.review`` slice of
-``services.py``, ``admin.py``) imports or calls into ``appkit`` — it becomes a real, load-bearing
-dependency starting with the views layer. Installing it now would also engage
-``appkit.checks.check_request_id_middleware``/``check_exception_handler`` (``appkit.E001``/
-``E002``), which `manage.py migrate`'s default system-check pass would then fail on for
-configuration this phase has no reason to carry yet. Added when a phase's own tests need it.
+**``appkit`` is now in ``INSTALLED_APPS``**, added in Phase 5 — the views layer is where it
+becomes a real, load-bearing dependency (``permissions.IsObjectOwner``, ``mixins.CachedListMixin``,
+``pagination.DefaultPagination``, ``exceptions.standard_exception_handler``,
+``request_id.RequestIDMiddleware``), per this file's own previous-phase note. Installing it engages
+``appkit.checks.check_request_id_middleware``/``check_exception_handler``
+(``appkit.E001``/``E002``, both check Errors) and ``check_throttle_scopes``
+(``appkit.W004``) — satisfied below by the middleware entry, ``EXCEPTION_HANDLER``, and
+``DEFAULT_THROTTLE_RATES`` respectively, mirroring ``cleanup_app``'s own
+``tests/backend/settings.py``, the sibling app package that wired the same dependency first.
 
 ``django.contrib.admin`` (+ ``sessions``/``messages``/``staticfiles``, its own dependencies) IS
 listed — this app ships ``admin.py`` registrations that this phase's own tests exercise through a
@@ -19,6 +21,16 @@ real Django admin changelist and actions.
 No ``DYNAMIC_USER`` dict at all — every key in it is optional with a documented default
 (``dynamic_user/conf.py``), and omitting it entirely is what proves that. Individual tests use
 ``override_settings`` where a non-default value matters.
+
+No ``DEFAULT_AUTHENTICATION_CLASSES`` override — DRF's own defaults
+(``SessionAuthentication`` first, ``BasicAuthentication`` second) are what a bare host gets, and
+neither ``base-scaffold``'s nor ``cleanup_app``'s own test settings override this either. An
+anonymous request therefore surfaces as ``403``, not ``401``:
+``APIView.handle_exception`` only keeps a ``NotAuthenticated`` at 401 when
+``get_authenticate_header()`` returns a non-empty ``WWW-Authenticate`` value, and
+``SessionAuthentication`` (checked first) deliberately returns none. The ``error.code`` stays
+``"not_authenticated"`` regardless — that's what actually distinguishes this case from
+authenticated-but-forbidden, not the HTTP status (see ``test_views.py``).
 """
 
 from __future__ import annotations
@@ -38,12 +50,14 @@ INSTALLED_APPS = [
     "django.contrib.admin",
     "rest_framework",
     "drf_spectacular",
+    "appkit",
     "dynamic_user",
     "tests.backend.mixin_app",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "appkit.request_id.RequestIDMiddleware",  # right after SecurityMiddleware — appkit.W002
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -90,6 +104,29 @@ DATABASES = {
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Every DRF-raised error (validation, 401/403/404/405/409/429, unhandled 500) renders in
+    # appkit's one documented envelope shape — satisfies appkit.E002.
+    "EXCEPTION_HANDLER": "appkit.exceptions.standard_exception_handler",
+    "DEFAULT_PAGINATION_CLASS": "appkit.pagination.DefaultPagination",
+    # Without this, a view's declared `throttle_scope` is inert — nothing actually enforces it.
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
+    # The six Phase 5 self-service scopes, literal strings per docs/CONTRACT.md §5 (never
+    # appkit.throttling.throttle_scope() — that helper rejects any argument containing "_", and
+    # "dynamic_user" has one). appkit.checks.check_throttle_scopes (W004) validates each view's
+    # declared throttle_scope against this dict.
+    "DEFAULT_THROTTLE_RATES": {
+        "dynamic_user_me": "60/min",
+        "dynamic_user_profile_update": "20/min",
+        "dynamic_user_setting_update": "20/min",
+        "dynamic_user_profiles_list": "60/min",
+        "dynamic_user_profile_retrieve": "60/min",
+        "dynamic_user_deletion_request": "10/min",
+    },
+    # appkit.W006: with a rate-limiting throttle class configured (above) and NUM_PROXIES unset,
+    # SimpleRateThrottle.get_ident() joins X-Forwarded-For's full chain into the cache key, so a
+    # spoofed header could mint a fresh bucket per request. Matches APPKIT["TRUSTED_PROXY_COUNT"]'s
+    # own default of 1 (no APPKIT dict here, so that default applies).
+    "NUM_PROXIES": 1,
 }
 
 # COMPONENT_SPLIT_REQUEST is required, not optional (APP-DESIGN.md §12, "Generated types") —
