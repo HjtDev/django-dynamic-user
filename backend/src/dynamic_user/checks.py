@@ -22,8 +22,12 @@ ID → function table:
   own ``AbstractProfile``/``AbstractSetting``. Cannot be implemented until those abstract bases
   exist (``docs/CONTRACT.md`` §1, built in Phase 2) — ``models.py`` ships empty in Phase 1 by
   design (this phase's own build prompt, item 8).
-* ``dynamic_user.E005`` — reserved for Phase 4: a name in a ``*_FIELDS`` allowlist that doesn't
-  exist on the resolved model (``docs/CONTRACT.md`` §6).
+* ``dynamic_user.E005`` — a name in a ``*_FIELDS`` allowlist that doesn't exist on the resolved
+  model it's checked against (``docs/CONTRACT.md`` §6). One of two cooperating mechanisms: this
+  check catches it at ``manage.py check``/startup time; ``serializers.build_serializer()`` (via
+  every accessor in ``serializers.py``) raises the same-shaped ``ImproperlyConfigured`` at call
+  time as the backstop for a command that skipped system checks. Both share
+  ``serializers._unknown_field_message()`` so the message is identical either way.
 
 Every check function returns a list of ``django.core.checks.Error`` — none of them ever raises.
 A system check that raises breaks ``manage.py`` entirely, for every command, not just ``check``;
@@ -46,7 +50,7 @@ own default do the right thing by construction.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from django.apps import apps as django_apps
@@ -129,3 +133,86 @@ def check_deletion_settings(
         ]
 
     return []
+
+
+def check_field_allowlists(
+    app_configs: Sequence[AppConfig] | None, **kwargs: Any
+) -> list[CheckMessage]:
+    """``dynamic_user.E005`` — validate every ``DYNAMIC_USER`` ``*_FIELDS`` allowlist against the
+    *resolved* model it configures a serializer for (``docs/CONTRACT.md`` §6's first of two
+    cooperating mechanisms; the second is ``serializers.build_serializer()``'s own
+    ``ImproperlyConfigured`` at call time).
+
+    Imports ``serializers.py`` and ``django.contrib.auth.get_user_model()`` function-locally, not
+    at this module's top level — ``apps.py``'s ``ready()`` must be able to register every check
+    unconditionally before anything settings-dependent runs, and importing ``serializers.py``
+    (which imports ``rest_framework``) at ``checks.py`` import time would make DRF a hard,
+    eager import for every host that merely lists ``"dynamic_user"`` in ``INSTALLED_APPS``.
+
+    Never raises: if a swappable-model setting is itself malformed (already reported by
+    ``dynamic_user.E001``/``E002``), resolution is skipped for that model rather than letting the
+    resulting exception propagate out of a system check.
+    """
+    from django.contrib.auth import get_user_model
+    from django.core.exceptions import ImproperlyConfigured
+    from django.db.models import Model
+
+    from dynamic_user.serializers import _unknown_field_message, _valid_field_names
+
+    resolvers: list[tuple[Callable[[], type[Model]], list[str]]] = [
+        (
+            get_user_model,
+            [
+                "USER_READ_FIELDS",
+                "USER_EDITABLE_FIELDS",
+                "USER_LOCKED_FIELDS",
+                "USER_PUBLIC_FIELDS",
+            ],
+        ),
+        (
+            resolution.get_profile_model,
+            ["PROFILE_READ_FIELDS", "PROFILE_EDITABLE_FIELDS", "PROFILE_PUBLIC_FIELDS"],
+        ),
+        (
+            resolution.get_setting_model,
+            ["SETTING_READ_FIELDS", "SETTING_EDITABLE_FIELDS"],
+        ),
+    ]
+
+    errors: list[CheckMessage] = []
+    for get_model, setting_keys in resolvers:
+        try:
+            model = get_model()
+        except ImproperlyConfigured:
+            # dynamic_user.E001/E002 already report a malformed swappable-model setting for this
+            # model — skip it here rather than letting resolution's own exception propagate out
+            # of a system check, which must never raise.
+            continue
+
+        valid = _valid_field_names(model)
+        for setting_key in setting_keys:
+            for field in conf.get_setting(setting_key):
+                if field not in valid:
+                    errors.append(
+                        Error(
+                            _unknown_field_message(field, model, setting_key),
+                            id="dynamic_user.E005",
+                        )
+                    )
+
+    try:
+        user_model = get_user_model()
+    except ImproperlyConfigured:
+        return errors
+
+    valid_user_fields = _valid_field_names(user_model)
+    for field in conf.get_privileged_fields():
+        if field not in valid_user_fields:
+            errors.append(
+                Error(
+                    _unknown_field_message(field, user_model, "USER_PRIVILEGED_FIELDS"),
+                    id="dynamic_user.E005",
+                )
+            )
+
+    return errors

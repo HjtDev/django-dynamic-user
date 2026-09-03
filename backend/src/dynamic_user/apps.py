@@ -37,6 +37,7 @@ class DynamicUserConfig(AppConfig):
 
         register(checks.check_swappable_model_settings)
         register(checks.check_deletion_settings)
+        register(checks.check_field_allowlists)
 
         if conf.get_setting("AUTO_CREATE_PROFILE"):
             signals.connect_profile_auto_provisioning()
