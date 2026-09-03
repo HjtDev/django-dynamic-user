@@ -1,0 +1,259 @@
+[build-system]
+# setuptools-scm deliberately NOT included here (APP-DESIGN.md §3.1 declares it but never wires
+# it up — no `dynamic = ["version"]`, no [tool.setuptools_scm] table — so it would be dead
+# weight, and it would fight CLAUDE.md's "pyproject.toml/package.json/CHANGELOG.md agree" rule
+# once all three files exist). Verified against app packages #1 (appkit) and #2 (cleanup_app)'s
+# own shipped pyproject.toml, both of which made the same call.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# "django-dynamic-user", not "dynamic-user" — the IMPORTABLE module stays `dynamic_user`
+# everywhere (INSTALLED_APPS, every import, AppConfig.name) exactly like appkit ships
+# `hjtdev-appkit` / `import appkit` and cleanup_app ships `hjtdev-django-cleanup` /
+# `import cleanup_app`. docs/CONTRACT.md §0.
+name = "django-dynamic-user"
+# Phase 10 bumps this to 1.0.0 alongside frontend/package.json and CHANGELOG.md — CI's
+# version-lockstep job enforces all three agreeing (this repo's CLAUDE.md "Both halves release
+# under one tag" rule).
+version = "0.1.0"
+description = "Swappable User/Profile/Setting data layer for a host Django project, as an installable app package."
+# Points at THIS directory's own README.md, not the repo-root one one level up — setuptools
+# reads `readme` relative to pyproject.toml, and a monorepo's sdist build has no reliable access
+# to files outside its own project root (build isolation may operate on a copy of just this
+# directory). backend/README.md is therefore a committed, generated COPY of the root README
+# (Phase 9's `make sync-readmes`), not hand-maintained prose of its own. Wired now, with a stub
+# copy, rather than deferred — omitting `readme` entirely is what shipped three real appkit
+# releases with an empty, unfixable PyPI description before anyone noticed (docs/CONTRACT.md's
+# own citation of appkit's docs/CONTRACT.md §22).
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+
+# Wide ranges on anything a host also depends on directly (django/drf/drf-spectacular) — see
+# APP-DESIGN.md §1.1. hjtdev-appkit is a declared-dependency exception to the no-inter-app-import
+# rule (CONTRACT.md §0's mechanical test: is it in [project.dependencies]? yes), not a sibling
+# app package. Exactly docs/CONTRACT.md §9's four ranges — verified live against appkit's own
+# published pyproject.toml (version 2.0.2).
+dependencies = [
+    "django>=5.2,<7.0",
+    "djangorestframework>=3.15,<4.0",
+    "drf-spectacular>=0.27,<1.0",
+    "hjtdev-appkit>=2.0,<3.0",
+]
+
+# A TOML subtable, not a plain key — MUST come after every bare [project] key above
+# (dependencies included). A subtable header implicitly closes the parent table to further bare
+# keys, so placing this any earlier silently nests dependencies/optional-dependencies under
+# [project.urls] instead of [project] (APP-DESIGN.md §3.1's own warning about this exact trap).
+[project.urls]
+Homepage = "https://github.com/HjtDev/django-dynamic-user"
+Repository = "https://github.com/HjtDev/django-dynamic-user"
+Changelog = "https://github.com/HjtDev/django-dynamic-user/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/HjtDev/ecosystem-docs/blob/main/APP-DESIGN.md"
+
+# Extras = features a CONSUMER opts into, installed with django-dynamic-user[celery] /
+# django-dynamic-user[avatar]. A host without Celery uses the deletion-finalize management
+# command via plain cron instead (docs/CONTRACT.md §8) — this app is fully functional with no
+# worker running. "avatar" pulls in Pillow via appkit's own "images" extra rather than
+# depending on Pillow directly — confirmed live against appkit's published pyproject.toml/
+# requires.txt/README: appkit's Pillow extra is spelled "images", not "avatar" or "imaging".
+[project.optional-dependencies]
+celery = ["celery[redis]>=5.4,<6.0", "django-celery-beat>=2.7,<3.0"]
+avatar = ["hjtdev-appkit[images]>=2.0,<3.0"]
+
+# PEP 735 groups = tooling for developing THIS package. Never installed by a consumer, never
+# published, not visible to a host at all.
+[dependency-groups]
+dev = [
+    "ruff>=0.12",
+    "mypy>=1.14",
+    "django-stubs[compatible-mypy]>=5.1",
+    "djangorestframework-stubs>=3.15",
+    "pre-commit>=4.0",
+]
+test = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+    "pytest-cov>=6.0",
+    "pytest-xdist>=3.6",
+    # This app ships User/Profile/Setting/AccountDeletionRequest and factories.py's public
+    # test-only surface (APP-DESIGN.md §7.3) — factory-boy is genuinely needed, not carried over
+    # reflexively.
+    "factory-boy>=3.3",
+    # >=3.2.10, not just >=3.2: psycopg-binary only started shipping cp314 wheels at 3.2.10, and
+    # .python-version pins 3.14 — same floor appkit's and cleanup_app's own pyproject.toml use,
+    # verified live against Python 3.14 (APP-DESIGN.md §7.5: tests run on Postgres).
+    "psycopg[binary]>=3.2.10",
+    # Contributor-only, never installed by a host and never the "avatar" extra itself: Django's
+    # ImageField.check() system check fails outright without Pillow installed, and Phase 2's
+    # AvatarMixin has a real ImageField — a contributor's `manage.py check` / test run needs
+    # Pillow present regardless of whether the "avatar" extra (which installs it via appkit's
+    # own "images" extra, for a HOST's runtime) is selected. >=11.3, not just >=11.0: pillow
+    # only started shipping cp314 wheels at 11.3.0 — same floor appkit's own pyproject.toml
+    # uses, and the same failure mode as psycopg-binary above (a source build without jpeg
+    # headers fails on the runner rather than erroring cleanly).
+    "pillow>=11.3",
+]
+
+[tool.uv]
+default-groups = ["dev", "test"]     # `uv sync` gives a contributor everything
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Belt and braces alongside MANIFEST.in: package-data is what actually lands package data in the
+# built WHEEL (MANIFEST.in only governs the sdist). Missing this would silently ship a wheel with
+# no type hints and no Phase 6 Jazzmin templates, even with MANIFEST.in and
+# include-package-data = true both present — the exact gap appkit's own pyproject.toml closes for
+# py.typed, extended here (per cleanup_app's own precedent) to also cover this app's templates/
+# and static/.
+[tool.setuptools.package-data]
+dynamic_user = [
+    "py.typed",
+    "templates/**/*",
+    "static/**/*",
+    "locale/*/LC_MESSAGES/*.po",
+    "locale/*/LC_MESSAGES/*.mo",
+]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "../tests"]
+# backend/README.md (the readme-sync copy above) sits inside this directory — `ruff format`
+# reformats Python code fences inside Markdown files by default, and without this exclude it
+# rewrites the README's own example config blocks to satisfy a formatter meant for src/ and
+# tests/, not narrative documentation (APP-DESIGN.md §3.1's own note on this exact trap).
+extend-exclude = ["README.md"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",     # pycodestyle
+    "F",          # pyflakes
+    "I",          # isort
+    "UP",         # pyupgrade
+    "B",          # bugbear
+    "DJ",         # flake8-django
+    "S",          # bandit — security
+    "TID",        # tidy-imports (used to enforce the boundary rules below)
+    "RUF",
+]
+ignore = ["S101"]  # assert is fine in tests
+
+[tool.ruff.lint.per-file-ignores]
+"../tests/**" = ["S", "TID251"]
+"*/migrations/*" = ["E501", "RUF012"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+# --- Host modules (APP-DESIGN.md §4): an app package can't assume a host's internals exist at a
+# stable import path. Names verified against appkit's and cleanup_app's own banned-api blocks,
+# both checked against a real host (base-scaffold/backend/): config, core, tools.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"tools".msg = "dynamic_user must never import host modules — APP-DESIGN.md §4."
+"core".msg = "dynamic_user must never import host modules — APP-DESIGN.md §4."
+"config".msg = "dynamic_user must never import host modules — APP-DESIGN.md §4."
+
+# --- Sibling app packages. django-dynamic-user is app package #3 — the ecosystem's first app
+# with a real sibling to ban (ecosystem-docs/APPS.md lists exactly appkit and
+# hjtdev-django-cleanup/cleanup_app as of this writing). Add one line per NEW app as each is
+# created:
+#   "<app>_app".msg = "App packages must never import each other — see APP-DESIGN.md §6."
+#
+# appkit is NEVER added here — it's a declared dependency ([project.dependencies] above), not a
+# sibling app package the rule exists to keep out (APP-DESIGN.md §1.1's mechanical test).
+"cleanup_app".msg = "App packages must never import each other — see APP-DESIGN.md §6."
+
+# Factories are a test-only surface (APP-DESIGN.md §7.3). This works in an app repo because the
+# test tree lives outside src/ and is cleanly exempted above (per-file-ignores) — a host project
+# can't do the same, see BASE-DESIGN.md §5.2.
+"dynamic_user.factories".msg = "factories.py is test-only — see APP-DESIGN.md §7.3."
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+warn_unreachable = true
+exclude = ["migrations/"]
+# NOT in APP-DESIGN.md §3.1's example. Without it, [tool.django-stubs]'s
+# django_settings_module = "tests.backend.settings" is unresolvable when mypy runs from backend/
+# (the settings module lives one level up, outside src/) and `uv run mypy src` fails — verified
+# against appkit's and cleanup_app's own pyproject.toml, both of which carry this same fix with
+# the same comment.
+mypy_path = "..:src"
+
+[[tool.mypy.overrides]]
+module = "*.migrations.*"
+ignore_errors = true
+
+# celery ships no py.typed marker and no bundled stubs on PyPI — a real gap in an optional
+# dependency (the celery extra), not something a local ignore comment should paper over.
+[[tool.mypy.overrides]]
+module = "celery.*"
+ignore_missing_imports = true
+
+# tasks.py's @shared_task is celery's own untyped decorator (see the override above) — applying
+# it to a fully-typed function is exactly what disallow_untyped_decorators exists to flag, but
+# there is no fix available here short of celery shipping stubs. Scoped to this one module, which
+# exists only to define the deletion-finalize task (docs/CONTRACT.md §8) — strict stays on
+# everywhere else.
+[[tool.mypy.overrides]]
+module = "dynamic_user.tasks"
+disallow_untyped_decorators = false
+
+# factory-boy ships py.typed but factory.declarations.Sequence/SubFactory (and most other
+# declaration classes) have unannotated __init__ signatures — strict's disallow_untyped_calls
+# then flags every ordinary factories.py usage of them. Scoped to this one module, which exists
+# only to call into that API (APP-DESIGN.md §7.3) — strict stays on everywhere else.
+[[tool.mypy.overrides]]
+module = "dynamic_user.factories"
+disallow_untyped_calls = false
+
+[tool.django-stubs]
+# tests/backend/settings.py doesn't exist until Phase 2 — mypy is not a Phase 1 verification
+# gate for exactly that reason (mirrors cleanup_app's own Phase 1, whose guide lists ruff, not
+# mypy, among Phase 1's checks). The setting is wired now so Phase 2 needs no further
+# pyproject.toml changes to make `uv run mypy src` pass.
+django_settings_module = "tests.backend.settings"
+
+# ---------------------------------------------------------------- pytest (see APP-DESIGN.md §7)
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.backend.settings"
+pythonpath = ["src", ".."]
+testpaths = ["../tests/backend"]
+python_files = ["test_*.py"]
+# `-p appkit.testing` opts into appkit's shared api_client/user/admin_user/auth_client/
+# admin_client/frozen_request_id/clear_cache/assert_error_envelope fixtures (appkit ships no
+# pytest11 entry point deliberately, so every consumer opts in explicitly).
+#
+# This is the ONE place this file deliberately does NOT copy appkit's own pyproject.toml:
+# appkit's addopts carries a hard "DO NOT add -p appkit.testing" comment, because a plugin
+# loaded via `-p` in addopts imports during pytest's early consider_preparse phase, before
+# pytest-cov's tracer attaches — coverage.py then permanently misreports that module (and
+# everything it imports at module scope) as "previously imported but not measured". That bit
+# appkit because its own suite measures --cov=appkit, and -p appkit.testing imports appkit's
+# OWN code before the tracer attaches. Here coverage measures --cov=dynamic_user, and
+# appkit.testing imports nothing from dynamic_user — the early-import artefact has no
+# dynamic_user-measured module to land on, so it cannot reproduce that failure mode. Same
+# reasoning cleanup_app's own pyproject.toml already applied for the same dependency.
+addopts = """
+  -ra --strict-markers --strict-config -p appkit.testing
+  --cov=dynamic_user --cov-report=term-missing --cov-fail-under=85
+"""
+markers = [
+    "slow: excluded from the default run, opt in with -m slow",
+    "integration: crosses a real DB/broker boundary rather than mocking it",
+    "requires_extra: needs the celery and/or avatar extra installed — deselected on the bare-install leg (-m 'not requires_extra', per this repo's CLAUDE.md commands table)",
+]
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.coverage.run]
+omit = ["*/migrations/*", "*/tests/*"]
