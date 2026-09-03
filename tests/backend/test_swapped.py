@@ -20,6 +20,7 @@ from django.contrib.auth import get_user_model
 
 from dynamic_user.models import AccountDeletionRequest, ChangeLogEntry
 from dynamic_user.resolution import get_profile_model, get_setting_model
+from dynamic_user.services import DeletionService
 
 pytestmark = [
     pytest.mark.django_db,
@@ -48,10 +49,15 @@ def test_swapped_user_extra_field_round_trips() -> None:
 
 
 def test_swapped_profile_extra_field_round_trips() -> None:
+    # AUTO_CREATE_PROFILE (default True, Phase 3) already provisioned a row for this user —
+    # updating it in place proves the extra field round-trips on the real auto-provisioned row,
+    # rather than fighting the OneToOne constraint with a second create().
     user = get_user_model().objects.create_user(
         username="erin", email="erin@example.com", password="pw"
     )
-    profile = get_profile_model().objects.create(user=user, tagline="hello world")
+    profile = get_profile_model().objects.get(user=user)
+    profile.tagline = "hello world"
+    profile.save(update_fields=["tagline"])
     profile.refresh_from_db()
     assert profile.tagline == "hello world"
     assert profile.bio == ""  # inherited AbstractProfile field still present and defaulted
@@ -61,7 +67,9 @@ def test_swapped_setting_extra_field_round_trips() -> None:
     user = get_user_model().objects.create_user(
         username="frank", email="frank@example.com", password="pw"
     )
-    setting = get_setting_model().objects.create(user=user, theme="dark")
+    setting = get_setting_model().objects.get(user=user)
+    setting.theme = "dark"
+    setting.save(update_fields=["theme"])
     setting.refresh_from_db()
     assert setting.theme == "dark"
     assert setting.language == "en"  # inherited AbstractSetting field still present
@@ -90,3 +98,35 @@ def test_change_log_entry_actor_fk_targets_swapped_user() -> None:
     entry = ChangeLogEntry.objects.get()
     assert entry.actor_id == user.pk
     assert entry.content_type == ContentType.objects.get_for_model(Widget)
+
+
+def test_auto_provisioning_creates_swapped_profile_and_setting() -> None:
+    """Phase 3's first real exercise of the swap machinery: the post_save receiver must reach
+    Profile/Setting through resolution.py, never a concrete dynamic_user.Profile/Setting import
+    — this is exactly what would silently create the WRONG rows under this settings module if
+    that rule were ever violated."""
+    user = get_user_model().objects.create_user(
+        username="iris", email="iris@example.com", password="pw"
+    )
+    profile = get_profile_model().objects.get(user=user)
+    setting = get_setting_model().objects.get(user=user)
+    assert type(profile) is get_profile_model()
+    assert type(setting) is get_setting_model()
+
+
+def test_deletion_request_review_finalize_round_trip_against_swapped_models() -> None:
+    user = get_user_model().objects.create_user(
+        username="jack", email="jack@example.com", password="pw"
+    )
+    admin = get_user_model().objects.create_superuser(
+        username="kate", email="kate@example.com", password="pw"
+    )
+
+    deletion_request = DeletionService.request(user)
+    assert deletion_request.status == AccountDeletionRequest.Status.PENDING
+
+    reviewed = DeletionService.review(deletion_request.pk, approved=True, reviewed_by=admin)
+    assert reviewed.status == AccountDeletionRequest.Status.APPROVED
+
+    DeletionService.finalize(deletion_request.pk)
+    assert not get_user_model().objects.filter(pk=user.pk).exists()

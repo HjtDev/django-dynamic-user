@@ -45,11 +45,18 @@ def test_profile_and_setting_resolve_to_the_separate_partial_app() -> None:
 
 
 def test_default_user_with_swapped_profile_and_setting_round_trip() -> None:
+    # AUTO_CREATE_PROFILE/AUTO_CREATE_SETTING (default True, Phase 3) already provisioned both
+    # rows for this user — updating them in place proves the round trip on the real
+    # auto-provisioned rows, rather than fighting the OneToOne constraint with a second create().
     user = get_user_model().objects.create_user(
         username="ivy", email="ivy@example.com", password="pw"
     )
-    profile = get_profile_model().objects.create(user=user, tagline="partial swap works")
-    setting = get_setting_model().objects.create(user=user, theme="dark")
+    profile = get_profile_model().objects.get(user=user)
+    profile.tagline = "partial swap works"
+    profile.save(update_fields=["tagline"])
+    setting = get_setting_model().objects.get(user=user)
+    setting.theme = "dark"
+    setting.save(update_fields=["theme"])
 
     profile.refresh_from_db()
     setting.refresh_from_db()
@@ -60,11 +67,12 @@ def test_default_user_with_swapped_profile_and_setting_round_trip() -> None:
 
 
 def test_profile_still_enforces_one_to_one_across_the_app_boundary() -> None:
+    """AUTO_CREATE_PROFILE already provisioned one row for this user — a second create() for
+    the same user must still violate the OneToOne constraint, even across the app boundary."""
     from django.db.utils import IntegrityError
 
     user = get_user_model().objects.create_user(
         username="jill", email="jill@example.com", password="pw"
     )
-    get_profile_model().objects.create(user=user)
     with pytest.raises(IntegrityError):
         get_profile_model().objects.create(user=user)

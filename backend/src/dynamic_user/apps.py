@@ -36,6 +36,7 @@ class DynamicUserConfig(AppConfig):
         from dynamic_user import checks, conf, signals
 
         register(checks.check_swappable_model_settings)
+        register(checks.check_deletion_settings)
 
         if conf.get_setting("AUTO_CREATE_PROFILE"):
             signals.connect_profile_auto_provisioning()

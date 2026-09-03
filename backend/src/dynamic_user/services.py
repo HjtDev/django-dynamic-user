@@ -1,13 +1,9 @@
 """This app's public callable interface — the ONLY place a Profile/Setting update or an
 account-deletion state transition happens.
 
-**Phase 2 scope note.** ``docs/CONTRACT.md`` §4 specifies this module in full — ``ProfileService``,
-``SettingService``, and all four ``DeletionService`` transitions (``request``/``review``/
-``finalize``/``cancel``). Phase 2 implements only ``DeletionService.review`` (plus the two
-exception types it needs), pulled forward from Phase 3 so ``admin.py``'s approve/reject action has
-something real to call instead of dead code. ``ProfileService.update``, ``SettingService.update``,
-and ``DeletionService.request``/``.finalize``/``.cancel`` remain Phase 3 work — their signatures
-below are exactly as the contract specifies, bodies not yet implemented.
+``docs/CONTRACT.md`` §4 specifies this module in full: ``ProfileService``, ``SettingService``, and
+all four ``DeletionService`` transitions (``request``/``review``/``finalize``/``cancel``) are
+implemented as of Phase 3.
 
 Every model reference in this module is resolved through ``resolution.py`` or
 ``settings.AUTH_USER_MODEL`` at call time, never a concrete import — the same rule this repo's
@@ -16,17 +12,29 @@ Every model reference in this module is resolved through ``resolution.py`` or
 Profile/Setting return types are ``AbstractProfile``/``AbstractSetting`` — accurate for any
 resolved model and import-safe, since importing the *abstract base* from ``dynamic_user.models``
 is not importing a concrete swappable model (``docs/CONTRACT.md`` §10 item 5).
+
+``DeletionService.cancel()`` deletes the ``PENDING`` row outright rather than moving it to some
+"cancelled" status — ``AccountDeletionRequest.Status`` has no such member, adding one is a schema
+change this phase doesn't make, and a deleted row lets the user call ``.request()`` again
+immediately with no leftover row to clean up later. No signal is sent for it; ``docs/CONTRACT.md``
+§3 defines none.
 """
 
 from __future__ import annotations
 
+import logging
+from datetime import timedelta
 from typing import Any, cast
 
 from django.contrib.auth.base_user import AbstractBaseUser
+from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
+from django.utils.module_loading import import_string
 
-from dynamic_user import signals
+from dynamic_user import conf, resolution, signals
 from dynamic_user.models import AbstractProfile, AbstractSetting, AccountDeletionRequest
+
+logger = logging.getLogger(__name__)
 
 
 class DeletionRequestAlreadyExists(Exception):
@@ -46,20 +54,54 @@ class ProfileService:
         ``profile_updated`` with ``changed_fields`` if anything actually changed. No-op fields
         (equal to the current value) are excluded from ``changed_fields``.
 
-        Phase 3 work — not yet implemented.
+        ``get_or_create``s the row rather than assuming one already exists — a host running
+        ``AUTO_CREATE_PROFILE=False``, or a user created before this app was installed, must
+        still be able to ``PATCH`` their profile instead of getting a 404/500 from a missing row.
         """
-        raise NotImplementedError("ProfileService.update is implemented in Phase 3.")
+        model = resolution.get_profile_model()
+        # resolution.py types this as the bare `type[Model]`, which django-stubs gives no
+        # `.objects` — the same swappable-model/stub mismatch `DeletionService.review()` below
+        # documents for `reviewed_by`. `cast` records that mismatch instead of silencing it
+        # wholesale.
+        profile, _ = cast(Any, model).objects.get_or_create(user=user)
+
+        changed_fields: list[str] = []
+        for field, value in validated_data.items():
+            if getattr(profile, field) != value:
+                setattr(profile, field, value)
+                changed_fields.append(field)
+
+        if changed_fields:
+            profile.save(update_fields=changed_fields)
+            signals.profile_updated.send(
+                sender=model, user_id=user.pk, changed_fields=changed_fields
+            )
+
+        return cast(AbstractProfile, profile)
 
 
 class SettingService:
     @staticmethod
     def update(user: AbstractBaseUser, validated_data: dict[str, Any]) -> AbstractSetting:
         """Writes ``validated_data`` onto ``user``'s Setting (``get_setting_model()``). No
-        signal — Setting changes are not currently part of the versioned-contract surface.
+        signal — Setting changes are not currently part of the versioned-contract surface
+        (``docs/CONTRACT.md`` §11 open item).
 
-        Phase 3 work — not yet implemented.
+        Same ``get_or_create`` reasoning as :meth:`ProfileService.update`.
         """
-        raise NotImplementedError("SettingService.update is implemented in Phase 3.")
+        model = resolution.get_setting_model()
+        setting, _ = cast(Any, model).objects.get_or_create(user=user)
+
+        changed_fields: list[str] = []
+        for field, value in validated_data.items():
+            if getattr(setting, field) != value:
+                setattr(setting, field, value)
+                changed_fields.append(field)
+
+        if changed_fields:
+            setting.save(update_fields=changed_fields)
+
+        return cast(AbstractSetting, setting)
 
 
 class DeletionService:
@@ -68,10 +110,36 @@ class DeletionService:
         """Raises ``DeletionRequestAlreadyExists`` if a pending or approved request already
         exists for this user. Computes ``finalize_at = now() + DELETION_GRACE_PERIOD_DAYS``,
         creates the row with ``status=PENDING``, sends ``deletion_requested``.
-
-        Phase 3 work — not yet implemented.
         """
-        raise NotImplementedError("DeletionService.request is implemented in Phase 3.")
+        already_active = AccountDeletionRequest.objects.filter(
+            user=cast(Any, user),
+            status__in=[
+                AccountDeletionRequest.Status.PENDING,
+                AccountDeletionRequest.Status.APPROVED,
+            ],
+        ).exists()
+        if already_active:
+            raise DeletionRequestAlreadyExists(
+                f"User {user.pk} already has a pending or approved deletion request."
+            )
+
+        grace_period_days = conf.get_setting("DELETION_GRACE_PERIOD_DAYS")
+        finalize_at = timezone.now() + timedelta(days=grace_period_days)
+
+        deletion_request = AccountDeletionRequest.objects.create(
+            user=cast(Any, user),
+            reason=reason,
+            status=AccountDeletionRequest.Status.PENDING,
+            finalize_at=finalize_at,
+        )
+
+        signals.deletion_requested.send(
+            sender=AccountDeletionRequest,
+            user_id=user.pk,
+            request_id=deletion_request.pk,
+            finalize_at=deletion_request.finalize_at,
+        )
+        return deletion_request
 
     @staticmethod
     def review(
@@ -119,19 +187,77 @@ class DeletionService:
 
     @staticmethod
     def finalize(request_id: int) -> None:
-        """Raises ``InvalidDeletionState`` if the request is not currently ``APPROVED``.
-        Implements ``DYNAMIC_USER["DELETION_MODE"]``. Sends ``deletion_finalized`` with ``mode``
-        either way, ``user_id`` captured before any delete.
+        """Raises ``InvalidDeletionState`` if the request is not currently ``APPROVED`` — never a
+        silent no-op. Implements ``DYNAMIC_USER["DELETION_MODE"]``: ``"hard_delete"`` deletes the
+        user row (Profile/Setting/this request cascade per each model's own ``on_delete``);
+        ``"anonymize"`` calls the conf-resolved ``DELETION_ANONYMIZE_FUNCTION`` instead and moves
+        this request to ``FINALIZED`` (nothing to cascade-delete in this mode). Sends
+        ``deletion_finalized`` with ``mode`` either way, ``user_id`` captured before any delete —
+        after a ``hard_delete`` there is no row left to read it from.
 
-        Phase 3 work — not yet implemented.
+        Fails closed on a misconfigured anonymize mode: raises ``ImproperlyConfigured`` rather
+        than silently falling back to ``hard_delete`` if ``DELETION_ANONYMIZE_FUNCTION`` is unset,
+        or if ``DELETION_MODE`` itself is neither ``"hard_delete"`` nor ``"anonymize"``. This is
+        the same invariant ``dynamic_user.E003`` (``checks.py``) catches at ``manage.py check``
+        time — this raise is the request-time backstop for a management command or task that
+        skipped system checks.
         """
-        raise NotImplementedError("DeletionService.finalize is implemented in Phase 3.")
+        try:
+            deletion_request = AccountDeletionRequest.objects.get(pk=request_id)
+        except AccountDeletionRequest.DoesNotExist as exc:
+            raise InvalidDeletionState(
+                f"AccountDeletionRequest {request_id} does not exist."
+            ) from exc
+
+        if deletion_request.status != AccountDeletionRequest.Status.APPROVED:
+            raise InvalidDeletionState(
+                f"AccountDeletionRequest {request_id} is '{deletion_request.status}', "
+                "not 'approved' — it cannot be finalized."
+            )
+
+        mode = conf.get_setting("DELETION_MODE")
+        user_id = deletion_request.user_id
+
+        if mode == "hard_delete":
+            deletion_request.user.delete()
+        elif mode == "anonymize":
+            dotted_path = conf.get_setting("DELETION_ANONYMIZE_FUNCTION")
+            if not dotted_path:
+                raise ImproperlyConfigured(
+                    'DYNAMIC_USER["DELETION_MODE"] is "anonymize" but '
+                    'DYNAMIC_USER["DELETION_ANONYMIZE_FUNCTION"] is not set.'
+                )
+            try:
+                anonymize = import_string(dotted_path)
+            except ImportError as exc:
+                raise ImproperlyConfigured(
+                    f'DYNAMIC_USER["DELETION_ANONYMIZE_FUNCTION"] names "{dotted_path}", '
+                    "which could not be imported."
+                ) from exc
+            if not callable(anonymize):
+                raise ImproperlyConfigured(
+                    f'DYNAMIC_USER["DELETION_ANONYMIZE_FUNCTION"] names "{dotted_path}", '
+                    "which is not callable."
+                )
+            anonymize(deletion_request.user)
+            deletion_request.status = AccountDeletionRequest.Status.FINALIZED
+            deletion_request.save(update_fields=["status"])
+        else:
+            raise ImproperlyConfigured(
+                f'DYNAMIC_USER["DELETION_MODE"] is "{mode}", which is neither "hard_delete" '
+                'nor "anonymize".'
+            )
+
+        signals.deletion_finalized.send(sender=AccountDeletionRequest, user_id=user_id, mode=mode)
 
     @staticmethod
     def cancel(user: AbstractBaseUser) -> None:
         """Raises ``InvalidDeletionState`` if the user's current request is not ``PENDING``
-        (already approved/rejected/finalized, or no request exists at all).
-
-        Phase 3 work — not yet implemented.
-        """
-        raise NotImplementedError("DeletionService.cancel is implemented in Phase 3.")
+        (already approved/rejected/finalized, or no request exists at all). Deletes the row on
+        success — see this module's docstring for why cancellation has no dedicated status."""
+        deletion_request = AccountDeletionRequest.objects.filter(
+            user=cast(Any, user), status=AccountDeletionRequest.Status.PENDING
+        ).first()
+        if deletion_request is None:
+            raise InvalidDeletionState(f"User {user.pk} has no pending deletion request to cancel.")
+        deletion_request.delete()

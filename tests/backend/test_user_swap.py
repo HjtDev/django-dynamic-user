@@ -40,11 +40,13 @@ def test_profile_and_setting_stay_at_dynamic_users_own_defaults() -> None:
 
 
 def test_default_profile_and_setting_with_swapped_user_round_trip() -> None:
+    # AUTO_CREATE_PROFILE/AUTO_CREATE_SETTING (default True, Phase 3) already provisioned both
+    # rows for this user — get() proves the round trip on the real auto-provisioned rows.
     user = get_user_model().objects.create_user(
         username="karl", email="karl@example.com", password="pw", department="sales"
     )
-    profile = get_profile_model().objects.create(user=user)
-    setting = get_setting_model().objects.create(user=user)
+    profile = get_profile_model().objects.get(user=user)
+    setting = get_setting_model().objects.get(user=user)
 
     assert profile.user_id == user.pk
     assert setting.user_id == user.pk

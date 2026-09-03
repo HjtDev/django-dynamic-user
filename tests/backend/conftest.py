@@ -45,3 +45,12 @@ def pending_deletion_request(user: object) -> AccountDeletionRequest:
         status=AccountDeletionRequest.Status.PENDING,
         finalize_at=timezone.now() + timezone.timedelta(days=14),
     )
+
+
+@pytest.fixture
+def approved_deletion_request(user: object) -> AccountDeletionRequest:
+    return AccountDeletionRequest.objects.create(
+        user=user,
+        status=AccountDeletionRequest.Status.APPROVED,
+        finalize_at=timezone.now() + timezone.timedelta(days=14),
+    )
