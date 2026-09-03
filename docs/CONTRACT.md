@@ -805,6 +805,58 @@ Everything not listed here is unchanged from
 13. **Jazzmin is explicitly not a dependency** — stated in §0 because the Phase 0 prompt never
     raises it, and a reader coming from a project that *does* bundle `django-jazzmin` could
     otherwise assume it's declared here the way `appkit` is.
+14. **`dynamic_user/migrations/0001_initial.py` carries `migrations.swappable_dependency
+    (settings.AUTH_USER_MODEL)`, but deliberately carries no equivalent for this app's own
+    `DYNAMIC_USER_PROFILE_MODEL`/`DYNAMIC_USER_SETTING_MODEL` settings** — a refinement of the
+    Phase 2 prompt's literal instruction ("add `migrations.swappable_dependency` for those two
+    settings as well"), reached by reading the installed Django 6.0.8 migration-loader/
+    autodetector source rather than assuming the instruction was safe as written, and confirmed
+    by generating and inspecting the real migrations for three separate host layouts.
+
+    **What's kept, and why it's needed.** `Profile`/`Setting`/`AccountDeletionRequest`/
+    `ChangeLogEntry` all FK/O2O to `settings.AUTH_USER_MODEL`. Django's own `makemigrations`
+    autodetector did *not* add this dependency when first generating this file — because, under
+    the settings module it ran against, `AUTH_USER_MODEL` resolved to this same migration's own
+    `User`, which `add_internal_dependencies` (`django/db/migrations/loader.py`) correctly
+    treats as needing no edge for *that* run. But this file ships fixed, for every host: one that
+    swaps `AUTH_USER_MODEL` to a different app entirely, while leaving `Profile`/`Setting` at
+    this app's own defaults, needs that other app's `User` table to exist before this migration
+    creates rows referencing it — exactly the precedent `django.contrib.admin`'s own `LogEntry`
+    migration sets (verified against the installed source: `admin/migrations/0001_initial.py`
+    carries `swappable_dependency(settings.AUTH_USER_MODEL)` for the same reason, since
+    `LogEntry.user` FKs to it from a different app than the one defining `User`). The dependency
+    was added back into this file by hand after generation. Proven safe for the common case too:
+    when `AUTH_USER_MODEL` still resolves to this app's own `User` (the default), the loader's
+    `check_key()` drops a same-app `__first__` reference as a no-op (ticket #22325) — it only
+    becomes a real graph edge when the target genuinely lives elsewhere. Exercised for real by
+    `tests/backend/settings_user_swap.py`/`test_user_swap.py` (`AUTH_USER_MODEL` swapped,
+    `Profile`/`Setting` at their defaults) alongside the unswapped leg
+    (`tests/backend/settings.py`), which together prove both directions of this one dependency.
+
+    **What's omitted, and why it would break.** Nothing in `dynamic_user`'s own migration file
+    references "the resolved profile/setting model" via FK/O2O — `Profile`/`Setting` themselves
+    *are* those models; `options={'swappable': ...}` on their own `CreateModel` operations
+    (present since generation, untouched) is the complete, correct mechanism Django already uses
+    to skip creating their table when a host swaps them out. Adding a
+    `swappable_dependency(DYNAMIC_USER_PROFILE_MODEL)`/`(DYNAMIC_USER_SETTING_MODEL)` edge as
+    well — the Phase 2 prompt's literal instruction — creates a two-node
+    `CircularDependencyError` for the single most plausible partial-swap host: one that swaps
+    only `Profile`/`Setting` to its own app while leaving `AUTH_USER_MODEL` at this app's
+    default. That host's own app needs `swappable_dependency(AUTH_USER_MODEL)` to point back at
+    `dynamic_user` (a real edge, since `AUTH_USER_MODEL` is external from *that* app's
+    perspective); `dynamic_user`'s migration depending back on that host app for
+    `DYNAMIC_USER_PROFILE_MODEL` would close the cycle. Verified live: generating and inspecting
+    `tests/backend/partial_app/migrations/0001_initial.py` shows exactly the real
+    `swappable_dependency(settings.AUTH_USER_MODEL)` edge described above, and
+    `dynamic_user/migrations/0001_initial.py` carries no dependency back on `partial_app` —
+    `tests/backend/test_partial_swap.py` applies this exact layout against real Postgres from
+    zero as the concrete, executable proof.
+15. **`ChangeLogEntry` is defined in `models.py`, not inside the `mixins.py` code block §1 shows
+    it in.** Django only auto-imports an app's `models.py` when building the app registry; a
+    concrete model defined in `mixins.py` would never be discovered/migrated unless something
+    else happened to import that module first. `HistoryMixin.log_change()` (`mixins.py`) reaches
+    it through a function-local import (`from dynamic_user.models import ChangeLogEntry`) — a
+    placement change only; no field, name, or index differs from what §1 specifies.
 
 ---
 
