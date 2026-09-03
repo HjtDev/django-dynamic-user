@@ -12,7 +12,12 @@ ID → function table:
 * ``dynamic_user.E001`` — ``DYNAMIC_USER_PROFILE_MODEL``/``DYNAMIC_USER_SETTING_MODEL`` is not
   of the form ``'app_label.ModelName'``.
 * ``dynamic_user.E002`` — the setting refers to a model that has not been installed.
-* ``dynamic_user.E003`` — reserved, unused as of Phase 1.
+* ``dynamic_user.E003`` — ``DYNAMIC_USER["DELETION_MODE"]`` is not ``"hard_delete"`` or
+  ``"anonymize"``, or it is ``"anonymize"`` while ``DYNAMIC_USER["DELETION_ANONYMIZE_FUNCTION"]``
+  is unset. The contract's "fails closed, never silently falls back to hard-delete" promise
+  (``docs/CONTRACT.md`` §6) caught at ``manage.py check`` time; ``services.DeletionService
+  .finalize()`` raises the same ``ImproperlyConfigured`` at call time as the backstop for a
+  command that skipped system checks.
 * ``dynamic_user.E004`` — reserved for Phase 2: the resolved model does not subclass this app's
   own ``AbstractProfile``/``AbstractSetting``. Cannot be implemented until those abstract bases
   exist (``docs/CONTRACT.md`` §1, built in Phase 2) — ``models.py`` ships empty in Phase 1 by
@@ -48,7 +53,7 @@ from django.apps import apps as django_apps
 from django.apps.config import AppConfig
 from django.core.checks import CheckMessage, Error
 
-from dynamic_user import resolution
+from dynamic_user import conf, resolution
 
 
 def check_swappable_model_settings(
@@ -88,6 +93,38 @@ def _check_model_setting(setting_name: str, value: str) -> list[CheckMessage]:
             Error(
                 f"{setting_name} refers to model '{value}' that has not been installed.",
                 id="dynamic_user.E002",
+            )
+        ]
+
+    return []
+
+
+def check_deletion_settings(
+    app_configs: Sequence[AppConfig] | None, **kwargs: Any
+) -> list[CheckMessage]:
+    """``dynamic_user.E003`` — validate ``DYNAMIC_USER["DELETION_MODE"]`` and, when it's
+    ``"anonymize"``, that ``DYNAMIC_USER["DELETION_ANONYMIZE_FUNCTION"]`` is actually set. Catches
+    at ``manage.py check``/startup time the same misconfiguration
+    ``services.DeletionService.finalize()`` would otherwise only discover mid-request, the first
+    time a request is finalized in anonymize mode.
+    """
+    mode = conf.get_setting("DELETION_MODE")
+
+    if mode not in ("hard_delete", "anonymize"):
+        return [
+            Error(
+                f'DYNAMIC_USER["DELETION_MODE"] is "{mode}", which is neither "hard_delete" '
+                'nor "anonymize".',
+                id="dynamic_user.E003",
+            )
+        ]
+
+    if mode == "anonymize" and not conf.get_setting("DELETION_ANONYMIZE_FUNCTION"):
+        return [
+            Error(
+                'DYNAMIC_USER["DELETION_MODE"] is "anonymize" but '
+                'DYNAMIC_USER["DELETION_ANONYMIZE_FUNCTION"] is not set.',
+                id="dynamic_user.E003",
             )
         ]
 

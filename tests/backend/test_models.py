@@ -56,12 +56,17 @@ def test_profile_and_setting_resolve_to_default_models() -> None:
 
 
 def test_profile_defaults(user: object) -> None:
+    """AUTO_CREATE_PROFILE (default True, Phase 3) already provisioned a row for `user` at
+    fixture creation time — delete it first so this test asserts model-level field defaults on
+    its own fresh row, independent of auto-provisioning behavior (covered by test_signals.py)."""
+    get_profile_model().objects.filter(user=user).delete()
     profile = get_profile_model().objects.create(user=user)
     assert profile.bio == ""
     assert profile.is_public is True
 
 
 def test_setting_defaults(user: object) -> None:
+    get_setting_model().objects.filter(user=user).delete()
     setting = get_setting_model().objects.create(user=user)
     assert setting.language == "en"
     assert setting.timezone == "UTC"
@@ -69,7 +74,8 @@ def test_setting_defaults(user: object) -> None:
 
 
 def test_profile_is_one_to_one(user: object) -> None:
-    get_profile_model().objects.create(user=user)
+    """AUTO_CREATE_PROFILE already provisioned one row for `user` at fixture creation time — a
+    second create for the same user must still violate the OneToOne constraint."""
     with pytest.raises(IntegrityError):
         get_profile_model().objects.create(user=user)
 

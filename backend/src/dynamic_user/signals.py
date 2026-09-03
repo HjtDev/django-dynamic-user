@@ -30,18 +30,29 @@ Per ``docs/CONTRACT.md`` §3's minimality argument, per field:
 
 Requires another app package: No.
 
-Phase 3 implements the receiver bodies of :func:`connect_profile_auto_provisioning` and
-:func:`connect_setting_auto_provisioning` (``dynamic_user.resolution`` — ``get_or_create`` on the
-resolved Profile/Setting model, then send the matching ``*_created`` signal) exactly as
-``docs/CONTRACT.md`` §3 specifies. ``apps.py``'s ``ready()`` already calls each of these,
-independently, under the matching ``AUTO_CREATE_PROFILE``/``AUTO_CREATE_SETTING`` guard; what
-they do today is connect nothing, since Phase 1 ships no model to receive ``post_save`` on the
-user model in the first place.
+:func:`connect_profile_auto_provisioning` and :func:`connect_setting_auto_provisioning` each
+connect a ``post_save`` receiver, keyed to the lazy string sender ``settings.AUTH_USER_MODEL``
+(resolved by Django's own ``ModelSignal`` machinery, not this package, so it works unmodified
+under a swapped ``AUTH_USER_MODEL``). ``apps.py``'s ``ready()`` calls each of these, independently,
+under the matching ``AUTO_CREATE_PROFILE``/``AUTO_CREATE_SETTING`` boot-time guard; the receiver
+body re-reads the same setting at call time before doing anything, so
+``override_settings(DYNAMIC_USER={"AUTO_CREATE_PROFILE": False})`` disables provisioning inside a
+test even though the receiver stays connected for the rest of the process
+(``docs/CONTRACT.md`` §3, ``CLAUDE.md`` rule 2). On ``created=True``, each receiver calls
+``get_or_create(user=instance)`` on the resolved Profile/Setting model and sends the matching
+``*_created`` signal only when a row was actually created.
 """
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import django.dispatch
+from django.conf import settings
+from django.db.models import Model
+from django.db.models.signals import post_save
+
+from dynamic_user import conf, resolution
 
 profile_created = django.dispatch.Signal()
 """Sent after Profile auto-provisioning creates a row. sender=get_profile_model().
@@ -69,17 +80,61 @@ profile_updated = django.dispatch.Signal()
 sender=get_profile_model(). Payload: user_id: int, changed_fields: list[str]"""
 
 
+def _provision_profile(sender: type[Model], instance: Any, created: bool, **kwargs: Any) -> None:
+    """The connected receiver body. Re-reads ``AUTO_CREATE_PROFILE`` at call time (not just at
+    the boot-time gate ``apps.py`` already applies before connecting) so
+    ``override_settings(DYNAMIC_USER={"AUTO_CREATE_PROFILE": False})`` actually disables
+    provisioning inside a test — settings are resolved at call time everywhere in this package,
+    never baked into a decision made once at import/``ready()`` time (``CLAUDE.md`` rule 2)."""
+    if not created:
+        return
+
+    if not conf.get_setting("AUTO_CREATE_PROFILE"):
+        return
+
+    model = resolution.get_profile_model()
+    # resolution.py types this as the bare `type[Model]`, which django-stubs gives no
+    # `.objects` — see the equivalent cast in services.py.
+    _, was_created = cast(Any, model).objects.get_or_create(user=instance)
+    if was_created:
+        profile_created.send(sender=model, user_id=instance.pk)
+
+
+def _provision_setting(sender: type[Model], instance: Any, created: bool, **kwargs: Any) -> None:
+    """Same shape as :func:`_provision_profile`, for Setting/``AUTO_CREATE_SETTING``/
+    ``setting_created``."""
+    if not created:
+        return
+
+    if not conf.get_setting("AUTO_CREATE_SETTING"):
+        return
+
+    model = resolution.get_setting_model()
+    _, was_created = cast(Any, model).objects.get_or_create(user=instance)
+    if was_created:
+        setting_created.send(sender=model, user_id=instance.pk)
+
+
 def connect_profile_auto_provisioning() -> None:
     """Connect the ``post_save(created=True)`` receiver that auto-creates a Profile row for a
     newly created user and sends ``profile_created``.
 
     Called from ``apps.py``'s ``ready()`` only when ``conf.get_setting("AUTO_CREATE_PROFILE")``
-    is true (the default). Phase 3 implements the receiver body
-    (``resolution.get_profile_model().objects.get_or_create(user=instance)`` then
-    ``profile_created.send(...)``); this function is a real, importable, connectable no-op until
-    then — never a bare ``pass`` placeholder module, since ``apps.py`` genuinely needs something
-    to call.
+    is true (the default) — that call-time gate decides whether this function runs at all, not
+    whether the connected receiver later provisions anything (:func:`_provision_profile`
+    re-checks the same setting per-save). ``sender`` is the lazy string
+    ``settings.AUTH_USER_MODEL`` — Django's ``ModelSignal.connect`` resolves an
+    ``"app_label.ModelName"`` sender via ``apps.lazy_model_operation``, the same indirection
+    ``get_user_model()`` itself relies on, so this connects correctly under a swapped
+    ``AUTH_USER_MODEL`` with no concrete import here. ``dispatch_uid`` makes a second ``ready()``
+    call (e.g. two app registries in one process, as some test runners do) a no-op reconnect
+    rather than a duplicate receiver.
     """
+    post_save.connect(
+        _provision_profile,
+        sender=settings.AUTH_USER_MODEL,
+        dispatch_uid="dynamic_user.provision_profile",
+    )
 
 
 def connect_setting_auto_provisioning() -> None:
@@ -89,3 +144,8 @@ def connect_setting_auto_provisioning() -> None:
     Called from ``apps.py``'s ``ready()`` only when ``conf.get_setting("AUTO_CREATE_SETTING")``
     is true (the default). Same shape as :func:`connect_profile_auto_provisioning`, for Setting.
     """
+    post_save.connect(
+        _provision_setting,
+        sender=settings.AUTH_USER_MODEL,
+        dispatch_uid="dynamic_user.provision_setting",
+    )
