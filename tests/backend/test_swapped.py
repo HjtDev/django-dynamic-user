@@ -18,6 +18,7 @@ import os
 import pytest
 from django.contrib.auth import get_user_model
 
+from dynamic_user import serializers
 from dynamic_user.models import AccountDeletionRequest, ChangeLogEntry
 from dynamic_user.resolution import get_profile_model, get_setting_model
 from dynamic_user.services import DeletionService
@@ -112,6 +113,57 @@ def test_auto_provisioning_creates_swapped_profile_and_setting() -> None:
     setting = get_setting_model().objects.get(user=user)
     assert type(profile) is get_profile_model()
     assert type(setting) is get_setting_model()
+
+
+def test_profile_edit_serializer_includes_the_swapped_app_extra_field() -> None:
+    """``settings_swapped.py``'s own ``DYNAMIC_USER["PROFILE_EDITABLE_FIELDS"]`` (Phase 4) lists
+    ``tagline`` — proving the factory resolves the field against ``swapped_app.Profile``, not a
+    hardcoded ``dynamic_user.Profile``."""
+    serializer_cls = serializers.get_profile_edit_serializer()
+    assert serializer_cls.Meta.model is get_profile_model()
+    assert "tagline" in serializer_cls().fields
+
+
+def test_profile_edit_serializer_patch_round_trip_sets_the_swapped_field() -> None:
+    """A full PATCH round trip — validate and save, not just instantiate — through the Phase 4
+    factory's own serializer class."""
+    user = get_user_model().objects.create_user(
+        username="liam", email="liam@example.com", password="pw"
+    )
+    profile = get_profile_model().objects.get(user=user)
+
+    serializer = serializers.get_profile_edit_serializer()(
+        profile, data={"tagline": "swapped tagline"}, partial=True
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+
+    profile.refresh_from_db()
+    assert profile.tagline == "swapped tagline"
+
+
+def test_setting_edit_serializer_patch_round_trip_sets_the_swapped_field() -> None:
+    user = get_user_model().objects.create_user(
+        username="maya", email="maya@example.com", password="pw"
+    )
+    setting = get_setting_model().objects.get(user=user)
+
+    serializer = serializers.get_setting_edit_serializer()(
+        setting, data={"theme": "dark"}, partial=True
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+
+    setting.refresh_from_db()
+    assert setting.theme == "dark"
+
+
+def test_user_read_serializer_includes_the_swapped_app_extra_field() -> None:
+    user = get_user_model().objects.create_user(
+        username="noah", email="noah@example.com", password="pw", department="engineering"
+    )
+    serializer = serializers.get_user_read_serializer()(user)
+    assert serializer.data["department"] == "engineering"
 
 
 def test_deletion_request_review_finalize_round_trip_against_swapped_models() -> None:
