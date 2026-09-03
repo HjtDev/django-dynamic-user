@@ -148,7 +148,17 @@ ignore = ["S101"]  # assert is fine in tests
 
 [tool.ruff.lint.per-file-ignores]
 "../tests/**" = ["S", "TID251"]
+# "*/migrations/*" alone only matches ONE path segment before "migrations" — it covers this
+# package's own src/dynamic_user/migrations/ but not a nested test-host app's migrations dir
+# (e.g. ../tests/backend/user_swap_app/migrations/), which sits two segments deep relative to
+# either configured src root. Found live the moment Phase 2 added test-only host apps with
+# their own migrations/ under ../tests/backend/*/migrations/ — every generated migration file
+# is Black/ruff-unformatted by design (`makemigrations` doesn't run a formatter), so both
+# patterns are needed, not just the deeper one, since removing the shallow one would be a
+# needless behavior change for this package's own migrations.
 "*/migrations/*" = ["E501", "RUF012"]
+"**/migrations/*" = ["E501", "RUF012"]
+"../tests/**/migrations/*" = ["E501", "RUF012"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "parents"
