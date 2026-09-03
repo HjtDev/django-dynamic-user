@@ -1,0 +1,442 @@
+openapi: 3.0.3
+info:
+  title: django-dynamic-user
+  version: 0.0.0
+paths:
+  /api/v1/users/me/:
+    get:
+      operationId: me_retrieve
+      description: USER_READ_FIELDS, entirely read-only — includes locked fields for
+        visibility, none of them writable from here or anywhere else on this surface.
+      summary: Get my account info
+      tags:
+      - dynamic-user
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User7C58E8'
+          description: ''
+  /api/v1/users/me/deletion-request/:
+    get:
+      operationId: me_deletion_request_retrieve
+      description: The caller's active (pending or approved) request, or 404 if none
+        exists.
+      summary: Get my current deletion request
+      tags:
+      - dynamic-user
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletionRequest'
+          description: ''
+    post:
+      operationId: me_deletion_request_create
+      description: Starts the grace-period countdown. 409 (not 500) if a request is
+        already pending or approved, rather than creating a duplicate.
+      summary: Request account deletion
+      tags:
+      - dynamic-user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeletionRequestCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeletionRequestCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeletionRequestCreateRequest'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletionRequest'
+          description: ''
+    delete:
+      operationId: me_deletion_request_destroy
+      description: 409 (not 500) if the caller's request isn't currently pending.
+      summary: Cancel my deletion request
+      tags:
+      - dynamic-user
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/users/me/profile/:
+    get:
+      operationId: me_profile_retrieve
+      description: PROFILE_EDITABLE_FIELDS + PROFILE_READ_FIELDS (union).
+      summary: Get my profile
+      tags:
+      - dynamic-user
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileE086A0'
+          description: ''
+    patch:
+      operationId: me_profile_partial_update
+      description: PROFILE_EDITABLE_FIELDS, applied via ProfileService.update.
+      summary: Update my profile
+      tags:
+      - dynamic-user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile7940FBRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile7940FBRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile7940FBRequest'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileE086A0'
+          description: ''
+  /api/v1/users/me/setting/:
+    get:
+      operationId: me_setting_retrieve
+      description: SETTING_EDITABLE_FIELDS + SETTING_READ_FIELDS (union).
+      summary: Get my setting
+      tags:
+      - dynamic-user
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingF129A3'
+          description: ''
+    patch:
+      operationId: me_setting_partial_update
+      description: SETTING_EDITABLE_FIELDS, applied via SettingService.update.
+      summary: Update my setting
+      tags:
+      - dynamic-user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSetting110AC7Request'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSetting110AC7Request'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSetting110AC7Request'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingF129A3'
+          description: ''
+  /api/v1/users/profiles/:
+    get:
+      operationId: profiles_list
+      description: Paginated, cached list of every profile with is_public=True. PROFILE_PUBLIC_FIELDS
+        plus a nested user block from USER_PUBLIC_FIELDS.
+      summary: List public profiles
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProfile5CEF83SerializerWithUserList'
+          description: ''
+  /api/v1/users/profiles/{id}/:
+    get:
+      operationId: profiles_retrieve
+      description: PROFILE_PUBLIC_FIELDS plus a nested user block from USER_PUBLIC_FIELDS,
+        for one profile. {id} is the target user's id, not the Profile row's own pk.
+        404 (not 403) when the profile is private and the requester isn't the owner.
+      summary: Retrieve a public profile
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile5CEF83SerializerWithUser'
+          description: ''
+components:
+  schemas:
+    DeletionRequest:
+      type: object
+      description: |-
+        ``GET``/``POST`` responses on ``/me/deletion-request/`` — entirely read-only.
+
+        Deliberately excludes ``user`` (redundant — the caller already knows who they are) and
+        ``reviewed_by`` — never expose ``reviewed_by`` on any user-facing serializer, per this
+        package's own rules and the Phase 5 guide.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusEnum'
+          readOnly: true
+        reason:
+          type: string
+          readOnly: true
+        requested_at:
+          type: string
+          format: date-time
+          readOnly: true
+        reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        finalize_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - finalize_at
+      - id
+      - reason
+      - requested_at
+      - reviewed_at
+      - status
+    DeletionRequestCreateRequest:
+      type: object
+      description: |-
+        ``POST /me/deletion-request/``'s request body — the only field a caller may supply.
+
+        ``AccountDeletionRequest`` isn't swappable (``docs/CONTRACT.md`` §1), and this shape isn't a
+        settings-driven allowlist surface, so it's hand-written with an explicit field list rather
+        than routed through :func:`build_serializer` — exactly the case this module's own docstring
+        and the Phase 5 guide call out.
+      properties:
+        reason:
+          type: string
+    PaginatedProfile5CEF83SerializerWithUserList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Profile5CEF83SerializerWithUser'
+    PatchedProfile7940FBRequest:
+      type: object
+      properties:
+        bio:
+          type: string
+        is_public:
+          type: boolean
+    PatchedSetting110AC7Request:
+      type: object
+      properties:
+        language:
+          type: string
+          minLength: 1
+          maxLength: 10
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+        notifications_enabled:
+          type: boolean
+    Profile5CEF83SerializerWithUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        bio:
+          type: string
+          readOnly: true
+        user:
+          allOf:
+          - $ref: '#/components/schemas/User6768FE'
+          readOnly: true
+      required:
+      - bio
+      - id
+      - user
+    ProfileE086A0:
+      type: object
+      properties:
+        bio:
+          type: string
+          readOnly: true
+        is_public:
+          type: boolean
+          readOnly: true
+        id:
+          type: integer
+          readOnly: true
+      required:
+      - bio
+      - id
+      - is_public
+    SettingF129A3:
+      type: object
+      properties:
+        language:
+          type: string
+          readOnly: true
+        timezone:
+          type: string
+          readOnly: true
+        notifications_enabled:
+          type: boolean
+          readOnly: true
+        id:
+          type: integer
+          readOnly: true
+      required:
+      - id
+      - language
+      - notifications_enabled
+      - timezone
+    StatusEnum:
+      enum:
+      - pending
+      - approved
+      - rejected
+      - finalized
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `approved` - Approved
+        * `rejected` - Rejected
+        * `finalized` - Finalized
+    User6768FE:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - username
+    User7C58E8:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        phone:
+          type: string
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+          readOnly: true
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - date_joined
+      - email
+      - id
+      - is_active
+      - name
+      - phone
+      - username
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid

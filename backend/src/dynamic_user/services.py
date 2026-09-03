@@ -106,6 +106,22 @@ class SettingService:
 
 class DeletionService:
     @staticmethod
+    def current(user: AbstractBaseUser) -> AccountDeletionRequest | None:
+        """The user's active request — ``status`` ``PENDING`` or ``APPROVED`` — or ``None``.
+
+        Matches ``.request()``'s own "already exists" predicate exactly, so "you may not create
+        one" and "here is the one you have" (``GET /me/deletion-request/``,
+        ``docs/CONTRACT.md`` §5) can never disagree about what counts as active.
+        """
+        return AccountDeletionRequest.objects.filter(
+            user=cast(Any, user),
+            status__in=[
+                AccountDeletionRequest.Status.PENDING,
+                AccountDeletionRequest.Status.APPROVED,
+            ],
+        ).first()
+
+    @staticmethod
     def request(user: AbstractBaseUser, *, reason: str = "") -> AccountDeletionRequest:
         """Raises ``DeletionRequestAlreadyExists`` if a pending or approved request already
         exists for this user. Computes ``finalize_at = now() + DELETION_GRACE_PERIOD_DAYS``,
