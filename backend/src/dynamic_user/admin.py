@@ -46,6 +46,8 @@ from django.contrib.auth.forms import AdminUserCreationForm as DjangoAdminUserCr
 from django.contrib.auth.forms import UserChangeForm as DjangoUserChangeForm
 from django.db.models import QuerySet
 from django.http import HttpRequest
+from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 
 from dynamic_user import resolution
 from dynamic_user.models import (
@@ -170,7 +172,7 @@ class SettingAdmin(_SettingAdminBase):
         return super().get_queryset(request).select_related("user")
 
 
-@admin.action(description="Approve selected deletion requests")
+@admin.action(description=_("Approve selected deletion requests"))
 def approve_selected(
     modeladmin: AccountDeletionRequestAdmin,
     request: HttpRequest,
@@ -182,7 +184,7 @@ def approve_selected(
     _review_selected(request, queryset, approved=True)
 
 
-@admin.action(description="Reject selected deletion requests")
+@admin.action(description=_("Reject selected deletion requests"))
 def reject_selected(
     modeladmin: AccountDeletionRequestAdmin,
     request: HttpRequest,
@@ -215,10 +217,26 @@ def _review_selected(
             reviewed += 1
 
     if reviewed:
-        verb = "approved" if approved else "rejected"
-        messages.success(request, f"{reviewed} deletion request(s) {verb}.")
+        if approved:
+            text = ngettext(
+                "%(count)d deletion request approved.",
+                "%(count)d deletion requests approved.",
+                reviewed,
+            )
+        else:
+            text = ngettext(
+                "%(count)d deletion request rejected.",
+                "%(count)d deletion requests rejected.",
+                reviewed,
+            )
+        messages.success(request, text % {"count": reviewed})
     if skipped:
-        messages.warning(request, f"{skipped} deletion request(s) skipped — see errors above.")
+        text = ngettext(
+            "%(count)d deletion request skipped — see errors above.",
+            "%(count)d deletion requests skipped — see errors above.",
+            skipped,
+        )
+        messages.warning(request, text % {"count": skipped})
 
 
 @admin.register(AccountDeletionRequest)

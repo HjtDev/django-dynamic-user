@@ -1,0 +1,296 @@
+# Persian (fa) translation catalog for django-dynamic-user's admin-facing strings.
+# This file is distributed under the same license as the django-dynamic-user package.
+msgid ""
+msgstr ""
+"Project-Id-Version: django-dynamic-user\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-04 10:46+0330\n"
+"PO-Revision-Date: 2026-09-04 11:00+0330\n"
+"Last-Translator: HjtDev\n"
+"Language-Team: Persian\n"
+"Language: fa\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#: admin.py:175
+msgid "Approve selected deletion requests"
+msgstr "تأیید درخواست‌های حذف انتخاب‌شده"
+
+#: admin.py:187
+msgid "Reject selected deletion requests"
+msgstr "رد درخواست‌های حذف انتخاب‌شده"
+
+#: admin.py:222
+#, python-format
+msgid "%(count)d deletion request approved."
+msgid_plural "%(count)d deletion requests approved."
+msgstr[0] "%(count)d درخواست حذف تأیید شد."
+msgstr[1] "%(count)d درخواست حذف تأیید شد."
+
+#: admin.py:228
+#, python-format
+msgid "%(count)d deletion request rejected."
+msgid_plural "%(count)d deletion requests rejected."
+msgstr[0] "%(count)d درخواست حذف رد شد."
+msgstr[1] "%(count)d درخواست حذف رد شد."
+
+#: admin.py:235
+#, python-format
+msgid "%(count)d deletion request skipped — see errors above."
+msgid_plural "%(count)d deletion requests skipped — see errors above."
+msgstr[0] "%(count)d درخواست حذف نادیده گرفته شد — به خطاهای بالا مراجعه کنید."
+msgstr[1] "%(count)d درخواست حذف نادیده گرفته شد — به خطاهای بالا مراجعه کنید."
+
+#: apps.py:21
+msgid "Dynamic User"
+msgstr "کاربر پویا"
+
+#: migrations/0001_initial.py:78 models.py:46
+msgid "username"
+msgstr "نام کاربری"
+
+#: migrations/0001_initial.py:82 models.py:47
+msgid "name"
+msgstr "نام"
+
+#: migrations/0001_initial.py:86 models.py:48
+msgid "email address"
+msgstr "آدرس ایمیل"
+
+#: migrations/0001_initial.py:95 models.py:49
+msgid "phone number"
+msgstr "شماره تلفن"
+
+#: migrations/0001_initial.py:103 models.py:54
+msgid ""
+"Designates whether this user should be treated as active. Unselect this "
+"instead of deleting accounts."
+msgstr "مشخص می‌کند که آیا این کاربر باید فعال در نظر گرفته شود. به‌جای حذف حساب‌ها، این گزینه را غیرفعال کنید."
+
+#: migrations/0001_initial.py:106 models.py:51
+msgid "active"
+msgstr "فعال"
+
+#: migrations/0001_initial.py:113 models.py:61
+msgid "Designates whether the user can log into this admin site."
+msgstr "مشخص می‌کند که آیا کاربر می‌تواند وارد این پیشخوان مدیریت شود یا خیر."
+
+#: migrations/0001_initial.py:114 models.py:59
+msgid "staff status"
+msgstr "وضعیت کارمندی"
+
+#: migrations/0001_initial.py:119 models.py:63
+msgid "date joined"
+msgstr "تاریخ عضویت"
+
+#: migrations/0001_initial.py:146 migrations/0001_initial.py:185
+#: migrations/0001_initial.py:220 migrations/0001_initial.py:291 models.py:76
+#: models.py:102 models.py:133 models.py:172
+msgid "user"
+msgstr "کاربر"
+
+#: migrations/0001_initial.py:147 models.py:77
+msgid "users"
+msgstr "کاربران"
+
+#: migrations/0001_initial.py:165 models.py:137
+msgid "language"
+msgstr "زبان"
+
+#: migrations/0001_initial.py:169 models.py:138
+msgid "timezone"
+msgstr "منطقهٔ زمانی"
+
+#: migrations/0001_initial.py:175 models.py:142
+msgid "Whether this user receives notifications."
+msgstr "مشخص می‌کند که آیا این کاربر اعلان دریافت می‌کند یا خیر."
+
+#: migrations/0001_initial.py:176 models.py:140
+msgid "notifications enabled"
+msgstr "اعلان‌ها فعال"
+
+#: migrations/0001_initial.py:191 models.py:147
+msgid "setting"
+msgstr "تنظیم"
+
+#: migrations/0001_initial.py:192 models.py:148
+msgid "settings"
+msgstr "تنظیمات"
+
+#: migrations/0001_initial.py:205 models.py:106
+msgid "bio"
+msgstr "بیوگرافی"
+
+#: migrations/0001_initial.py:210 models.py:110
+msgid "Whether this profile is visible to other users."
+msgstr "مشخص می‌کند که آیا این نمایه برای سایر کاربران قابل مشاهده است یا خیر."
+
+#: migrations/0001_initial.py:211 models.py:108
+msgid "public"
+msgstr "عمومی"
+
+#: migrations/0001_initial.py:226 models.py:115
+msgid "profile"
+msgstr "نمایه"
+
+#: migrations/0001_initial.py:227 models.py:116
+msgid "profiles"
+msgstr "نمایه‌ها"
+
+#: migrations/0001_initial.py:244 models.py:165
+msgid "Pending"
+msgstr "در انتظار"
+
+#: migrations/0001_initial.py:245 models.py:166
+msgid "Approved"
+msgstr "تأیید شده"
+
+#: migrations/0001_initial.py:246 models.py:167
+msgid "Rejected"
+msgstr "رد شده"
+
+#: migrations/0001_initial.py:247 models.py:168
+msgid "Finalized"
+msgstr "نهایی شده"
+
+#: migrations/0001_initial.py:251 models.py:177
+msgid "status"
+msgstr "وضعیت"
+
+#: migrations/0001_initial.py:258 models.py:180
+msgid "Optional reason provided by the user."
+msgstr "دلیل اختیاری ارائه‌شده توسط کاربر."
+
+#: migrations/0001_initial.py:259 models.py:180
+msgid "reason"
+msgstr "دلیل"
+
+#: migrations/0001_initial.py:264 models.py:182
+msgid "requested at"
+msgstr "زمان درخواست"
+
+#: migrations/0001_initial.py:268 models.py:183
+msgid "reviewed at"
+msgstr "زمان بررسی"
+
+#: migrations/0001_initial.py:272 models.py:192
+msgid "finalize at"
+msgstr "زمان نهایی‌سازی"
+
+#: migrations/0001_initial.py:282 models.py:186
+msgid "reviewed by"
+msgstr "بررسی‌شده توسط"
+
+#: migrations/0001_initial.py:296 models.py:195
+msgid "account deletion request"
+msgstr "درخواست حذف حساب"
+
+#: migrations/0001_initial.py:297 models.py:196
+msgid "account deletion requests"
+msgstr "درخواست‌های حذف حساب"
+
+#: migrations/0001_initial.py:311 models.py:217
+msgid "object id"
+msgstr "شناسهٔ شیء"
+
+#: migrations/0001_initial.py:315 models.py:227
+msgid "field name"
+msgstr "نام فیلد"
+
+#: migrations/0001_initial.py:317 models.py:228
+msgid "old value"
+msgstr "مقدار قبلی"
+
+#: migrations/0001_initial.py:318 models.py:229
+msgid "new value"
+msgstr "مقدار جدید"
+
+#: migrations/0001_initial.py:321 models.py:230
+msgid "changed at"
+msgstr "زمان تغییر"
+
+#: migrations/0001_initial.py:330 models.py:221
+msgid "actor"
+msgstr "عامل"
+
+#: migrations/0001_initial.py:331 models.py:225
+msgid "The user who made this change, if known."
+msgstr "کاربری که این تغییر را انجام داده است، در صورت مشخص بودن."
+
+#: migrations/0001_initial.py:339 models.py:215
+msgid "content type"
+msgstr "نوع محتوا"
+
+#: migrations/0001_initial.py:344 models.py:233
+msgid "change log entry"
+msgstr "رکورد تاریخچهٔ تغییرات"
+
+#: migrations/0001_initial.py:345 models.py:234
+msgid "change log entries"
+msgstr "رکوردهای تاریخچهٔ تغییرات"
+
+#: mixins.py:45
+msgid "avatar"
+msgstr "آواتار"
+
+#: mixins.py:49
+msgid "Profile picture."
+msgstr "تصویر نمایه."
+
+#: mixins.py:51
+msgid "avatar updated at"
+msgstr "زمان به‌روزرسانی آواتار"
+
+#: mixins.py:60
+msgid "created at"
+msgstr "زمان ایجاد"
+
+#: mixins.py:61
+msgid "updated at"
+msgstr "زمان به‌روزرسانی"
+
+#: mixins.py:119
+msgid "deleted"
+msgstr "حذف‌شده"
+
+#: mixins.py:119
+msgid "Whether this row is soft-deleted."
+msgstr "مشخص می‌کند که آیا این رکورد به‌صورت نرم حذف شده است یا خیر."
+
+#: mixins.py:121
+msgid "deleted at"
+msgstr "زمان حذف"
+
+#: mixins.py:131
+msgid "email verified"
+msgstr "ایمیل تأییدشده"
+
+#: mixins.py:132
+msgid "email verified at"
+msgstr "زمان تأیید ایمیل"
+
+#: mixins.py:133
+msgid "phone verified"
+msgstr "تلفن تأییدشده"
+
+#: mixins.py:134
+msgid "phone verified at"
+msgstr "زمان تأیید تلفن"
+
+#: mixins.py:145
+msgid "last seen at"
+msgstr "آخرین بازدید"
+
+#: mixins.py:146
+msgid "last seen IP"
+msgstr "آی‌پی آخرین بازدید"
+
+#: mixins.py:158
+msgid "metadata"
+msgstr "فراداده"
+
+#: mixins.py:158
+msgid "Unstructured host-specific data."
+msgstr "دادهٔ بدون‌ساختار مخصوص میزبان."

@@ -25,10 +25,18 @@
 # one (via ITS OWN swappable_dependency(AUTH_USER_MODEL) call) while this migration would try to
 # depend back on that host app — a two-node cycle. Proven acyclic for real by
 # `tests/backend/test_partial_swap.py`.
+#
+# `verbose_name`/`help_text`/`Meta.verbose_name(_plural)`/`Status` choice labels below were
+# hand-amended into this already-merged file, rather than added via a later `0002_alter_*.py`,
+# for the i18n retrofit (fa locale) — safe only because no tagged release has shipped yet and no
+# real host has migrated against it. Verified via a real `makemigrations --check --dry-run`
+# against `models.py`'s actual state (its own diff is what these field kwargs come from), not
+# guessed by hand.
 
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
+from django.utils.translation import gettext_lazy as _
 
 import dynamic_user.managers
 
@@ -65,13 +73,51 @@ class Migration(migrations.Migration):
                         verbose_name="superuser status",
                     ),
                 ),
-                ("username", models.CharField(max_length=150, unique=True)),
-                ("name", models.CharField(blank=True, max_length=150)),
-                ("email", models.EmailField(max_length=254, unique=True)),
-                ("phone", models.CharField(blank=True, max_length=32, null=True, unique=True)),
-                ("is_active", models.BooleanField(default=True)),
-                ("is_staff", models.BooleanField(default=False)),
-                ("date_joined", models.DateTimeField(auto_now_add=True)),
+                (
+                    "username",
+                    models.CharField(max_length=150, unique=True, verbose_name=_("username")),
+                ),
+                (
+                    "name",
+                    models.CharField(blank=True, max_length=150, verbose_name=_("name")),
+                ),
+                (
+                    "email",
+                    models.EmailField(max_length=254, unique=True, verbose_name=_("email address")),
+                ),
+                (
+                    "phone",
+                    models.CharField(
+                        blank=True,
+                        max_length=32,
+                        null=True,
+                        unique=True,
+                        verbose_name=_("phone number"),
+                    ),
+                ),
+                (
+                    "is_active",
+                    models.BooleanField(
+                        default=True,
+                        help_text=_(
+                            "Designates whether this user should be treated as active. "
+                            "Unselect this instead of deleting accounts."
+                        ),
+                        verbose_name=_("active"),
+                    ),
+                ),
+                (
+                    "is_staff",
+                    models.BooleanField(
+                        default=False,
+                        help_text=_("Designates whether the user can log into this admin site."),
+                        verbose_name=_("staff status"),
+                    ),
+                ),
+                (
+                    "date_joined",
+                    models.DateTimeField(auto_now_add=True, verbose_name=_("date joined")),
+                ),
                 (
                     "groups",
                     models.ManyToManyField(
@@ -97,6 +143,8 @@ class Migration(migrations.Migration):
             ],
             options={
                 "abstract": False,
+                "verbose_name": _("user"),
+                "verbose_name_plural": _("users"),
                 "swappable": "AUTH_USER_MODEL",
             },
             managers=[
@@ -112,20 +160,36 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                ("language", models.CharField(default="en", max_length=10)),
-                ("timezone", models.CharField(default="UTC", max_length=64)),
-                ("notifications_enabled", models.BooleanField(default=True)),
+                (
+                    "language",
+                    models.CharField(default="en", max_length=10, verbose_name=_("language")),
+                ),
+                (
+                    "timezone",
+                    models.CharField(default="UTC", max_length=64, verbose_name=_("timezone")),
+                ),
+                (
+                    "notifications_enabled",
+                    models.BooleanField(
+                        default=True,
+                        help_text=_("Whether this user receives notifications."),
+                        verbose_name=_("notifications enabled"),
+                    ),
+                ),
                 (
                     "user",
                     models.OneToOneField(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="setting",
                         to=settings.AUTH_USER_MODEL,
+                        verbose_name=_("user"),
                     ),
                 ),
             ],
             options={
                 "abstract": False,
+                "verbose_name": _("setting"),
+                "verbose_name_plural": _("settings"),
                 "swappable": "DYNAMIC_USER_SETTING_MODEL",
             },
         ),
@@ -138,19 +202,29 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                ("bio", models.TextField(blank=True)),
-                ("is_public", models.BooleanField(default=True)),
+                ("bio", models.TextField(blank=True, verbose_name=_("bio"))),
+                (
+                    "is_public",
+                    models.BooleanField(
+                        default=True,
+                        help_text=_("Whether this profile is visible to other users."),
+                        verbose_name=_("public"),
+                    ),
+                ),
                 (
                     "user",
                     models.OneToOneField(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="profile",
                         to=settings.AUTH_USER_MODEL,
+                        verbose_name=_("user"),
                     ),
                 ),
             ],
             options={
                 "abstract": False,
+                "verbose_name": _("profile"),
+                "verbose_name_plural": _("profiles"),
                 "swappable": "DYNAMIC_USER_PROFILE_MODEL",
             },
         ),
@@ -167,19 +241,36 @@ class Migration(migrations.Migration):
                     "status",
                     models.CharField(
                         choices=[
-                            ("pending", "Pending"),
-                            ("approved", "Approved"),
-                            ("rejected", "Rejected"),
-                            ("finalized", "Finalized"),
+                            ("pending", _("Pending")),
+                            ("approved", _("Approved")),
+                            ("rejected", _("Rejected")),
+                            ("finalized", _("Finalized")),
                         ],
                         default="pending",
                         max_length=10,
+                        verbose_name=_("status"),
                     ),
                 ),
-                ("reason", models.TextField(blank=True)),
-                ("requested_at", models.DateTimeField(auto_now_add=True)),
-                ("reviewed_at", models.DateTimeField(blank=True, null=True)),
-                ("finalize_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "reason",
+                    models.TextField(
+                        blank=True,
+                        help_text=_("Optional reason provided by the user."),
+                        verbose_name=_("reason"),
+                    ),
+                ),
+                (
+                    "requested_at",
+                    models.DateTimeField(auto_now_add=True, verbose_name=_("requested at")),
+                ),
+                (
+                    "reviewed_at",
+                    models.DateTimeField(blank=True, null=True, verbose_name=_("reviewed at")),
+                ),
+                (
+                    "finalize_at",
+                    models.DateTimeField(blank=True, null=True, verbose_name=_("finalize at")),
+                ),
                 (
                     "reviewed_by",
                     models.ForeignKey(
@@ -188,6 +279,7 @@ class Migration(migrations.Migration):
                         on_delete=django.db.models.deletion.SET_NULL,
                         related_name="reviewed_deletion_requests",
                         to=settings.AUTH_USER_MODEL,
+                        verbose_name=_("reviewed by"),
                     ),
                 ),
                 (
@@ -196,9 +288,14 @@ class Migration(migrations.Migration):
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="deletion_requests",
                         to=settings.AUTH_USER_MODEL,
+                        verbose_name=_("user"),
                     ),
                 ),
             ],
+            options={
+                "verbose_name": _("account deletion request"),
+                "verbose_name_plural": _("account deletion requests"),
+            },
         ),
         migrations.CreateModel(
             name="ChangeLogEntry",
@@ -209,11 +306,20 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                ("object_id", models.PositiveBigIntegerField()),
-                ("field_name", models.CharField(max_length=100)),
-                ("old_value", models.TextField(blank=True)),
-                ("new_value", models.TextField(blank=True)),
-                ("changed_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "object_id",
+                    models.PositiveBigIntegerField(verbose_name=_("object id")),
+                ),
+                (
+                    "field_name",
+                    models.CharField(max_length=100, verbose_name=_("field name")),
+                ),
+                ("old_value", models.TextField(blank=True, verbose_name=_("old value"))),
+                ("new_value", models.TextField(blank=True, verbose_name=_("new value"))),
+                (
+                    "changed_at",
+                    models.DateTimeField(auto_now_add=True, verbose_name=_("changed at")),
+                ),
                 (
                     "actor",
                     models.ForeignKey(
@@ -221,15 +327,23 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.SET_NULL,
                         to=settings.AUTH_USER_MODEL,
+                        verbose_name=_("actor"),
+                        help_text=_("The user who made this change, if known."),
                     ),
                 ),
                 (
                     "content_type",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="contenttypes.contenttype"
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="contenttypes.contenttype",
+                        verbose_name=_("content type"),
                     ),
                 ),
             ],
+            options={
+                "verbose_name": _("change log entry"),
+                "verbose_name_plural": _("change log entries"),
+            },
         ),
         migrations.AddIndex(
             model_name="user",
