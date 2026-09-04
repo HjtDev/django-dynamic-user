@@ -64,6 +64,16 @@ def admin_user(db: None) -> object:
 
 
 @pytest.fixture
+def staff_user(db: None) -> object:
+    """``is_staff=True``, ``is_superuser=False`` — the "staff is enough" leg of
+    ``IsDynamicUserAdmin``'s ``ADMIN_REQUIRES_SUPERUSER`` gate, and the account every
+    privilege-escalation test attempts *from*."""
+    return get_user_model().objects.create_user(
+        username="carol", email="carol@example.com", password="pw", is_staff=True
+    )
+
+
+@pytest.fixture
 def profile(user: object) -> Any:
     model = resolution.get_profile_model()
     obj, _ = cast(Any, model).objects.get_or_create(user=user)

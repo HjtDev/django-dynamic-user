@@ -110,10 +110,11 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "appkit.pagination.DefaultPagination",
     # Without this, a view's declared `throttle_scope` is inert — nothing actually enforces it.
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
-    # The six Phase 5 self-service scopes, literal strings per docs/CONTRACT.md §5 (never
-    # appkit.throttling.throttle_scope() — that helper rejects any argument containing "_", and
-    # "dynamic_user" has one). appkit.checks.check_throttle_scopes (W004) validates each view's
-    # declared throttle_scope against this dict.
+    # The six Phase 5 self-service scopes plus the eight Phase 6 admin scopes, all literal
+    # strings per docs/CONTRACT.md §5 (never appkit.throttling.throttle_scope() — that helper
+    # rejects any argument containing "_", and "dynamic_user" has one).
+    # appkit.checks.check_throttle_scopes (W004) validates each view's declared throttle_scope
+    # against this dict.
     "DEFAULT_THROTTLE_RATES": {
         "dynamic_user_me": "60/min",
         "dynamic_user_profile_update": "20/min",
@@ -121,6 +122,14 @@ REST_FRAMEWORK = {
         "dynamic_user_profiles_list": "60/min",
         "dynamic_user_profile_retrieve": "60/min",
         "dynamic_user_deletion_request": "10/min",
+        "dynamic_user_admin_users_list": "60/min",
+        "dynamic_user_admin_user_retrieve": "60/min",
+        "dynamic_user_admin_user_update": "30/min",
+        "dynamic_user_admin_profile_update": "30/min",
+        "dynamic_user_admin_setting_update": "30/min",
+        "dynamic_user_admin_deletions_list": "60/min",
+        "dynamic_user_admin_deletion_review": "20/min",
+        "dynamic_user_admin_deletion_finalize": "10/min",
     },
     # appkit.W006: with a rate-limiting throttle class configured (above) and NUM_PROXIES unset,
     # SimpleRateThrottle.get_ident() joins X-Forwarded-For's full chain into the cache key, so a
