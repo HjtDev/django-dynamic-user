@@ -22,8 +22,8 @@ Twenty keys, all optional at the Python level (``docs/CONTRACT.md`` §6)::
         # regardless via a separate full-fields build).
         "USER_EDITABLE_FIELDS": ["name", "phone"],
         # Fields writable via a future self-service /me/ PATCH — currently unused since
-        # GET /me/ is read-only, kept for forward-compat and admin PATCH's own allowlist
-        # baseline.
+        # GET /me/ is read-only and admin PATCH builds from the model's full field set via
+        # get_admin_user_serializer(), not this allowlist. Kept for forward-compat.
         "USER_LOCKED_FIELDS": ["username", "email", "is_staff", "is_superuser", "is_active"],
         # Subtracted from USER_EDITABLE_FIELDS at build time even if a host also lists one of
         # these there — belt-and-braces, deterministic.

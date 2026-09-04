@@ -12,8 +12,59 @@ that entry gets built from, not a substitute for it.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-05
+
+First tagged release. Everything below shipped across Phases 0–9; there is no prior release to
+diff against, so this entry is organized by subsystem rather than by phase.
+
 ### Added
-- Frontend SDK (`@hjtdev/django-dynamic-user`, `frontend/`): 20 typed React hooks over both API
+
+- **Data layer** (`models.py`, `mixins.py`, `migrations/0001_initial.py`): abstract
+  `AbstractDynamicUser`/`AbstractProfile`/`AbstractSetting` bases plus swappable concrete
+  `User`/`Profile`/`Setting` defaults, resolved everywhere via `settings.AUTH_USER_MODEL` /
+  `resolution.get_profile_model()` / `resolution.get_setting_model()` — never a concrete import.
+  `AccountDeletionRequest` and `ChangeLogEntry` models. `UserManager` (rejects an explicit
+  `is_staff=False` on `create_superuser`). Seven composable mixins: `AvatarMixin`,
+  `TimestampMixin`, `HistoryMixin` (`log_change()`, via `django.contrib.contenttypes`),
+  `SoftDeleteMixin`, `VerificationMixin`, `LastSeenMixin`, `MetadataMixin`. `run_validators()` plus
+  the `PHONE_VALIDATORS`/`NAME_VALIDATORS` region-specific hook points.
+- **Business logic** (`services.py`, `signals.py`, `tasks.py`): `ProfileService.update()`,
+  `SettingService.update()`, and `DeletionService` (`current()`, `request()`, `review()`,
+  `finalize()`, `cancel()`) implementing the full opt-out account-deletion state machine.
+  Auto-provisioning receivers (`connect_profile_auto_provisioning()`,
+  `connect_setting_auto_provisioning()`) wired through `apps.py.ready()` against the *resolved*
+  models, gated by `AUTO_CREATE_PROFILE`/`AUTO_CREATE_SETTING`. Six signals: `profile_created`,
+  `setting_created`, `deletion_requested`, `deletion_reviewed`, `deletion_finalized`,
+  `profile_updated`. `finalize_due_deletions`/`purge_deletion_history` Celery tasks (optional
+  `celery` extra) plus a `process_deletion_requests` management command for a host with no
+  worker. `dynamic_user.E003` system check for a misconfigured `DELETION_MODE`/
+  `DELETION_ANONYMIZE_FUNCTION` pairing.
+- **Settings-driven serializer factory** (`serializers.py`, `checks.py`): `build_serializer()` —
+  `lru_cache`-identical per allowlist, hard-refuses `password`/any hash field even if explicitly
+  requested, validates every field name against the resolved model. `dynamic_user.E005` system
+  check catching a `DYNAMIC_USER` field allowlist that names a field the resolved model doesn't
+  have. Module-level accessors wiring every `*_FIELDS` setting to the resolved models with zero
+  view-layer changes required from a host that subclasses `User`/`Profile`/`Setting`.
+- **Self-service DRF API** (`views.py`, `urls.py`, basePath `/api/v1/users`): six views — see own
+  info, edit own profile/setting, browse others' public profiles, and the deletion-request
+  request/cancel/status endpoints. `IsProfileOwner` and `IsPublicOrOwner` permission classes — a
+  private profile 404s for a non-owner rather than 403ing, so its existence doesn't leak.
+- **Admin DRF API** (`admin_views.py`, `urls_admin.py`, basePath `/api/v1/admin/users`): full
+  read/write over every user, profile, setting, and the account-deletion review/finalize flow,
+  gated by `IsDynamicUserAdmin` (`DYNAMIC_USER["ADMIN_REQUIRES_SUPERUSER"]`-aware).
+  `CanEscalatePrivilege` rejects any admin `PATCH` touching `is_staff`/`is_superuser`/
+  `is_active`/`groups`/`user_permissions` unless the caller is an actual superuser, independent of
+  `ADMIN_REQUIRES_SUPERUSER`. `IsSuperUser` gate on `POST /deletion-requests/{id}/finalize/` —
+  superuser-only regardless of `ADMIN_REQUIRES_SUPERUSER`, since it bypasses the deletion grace
+  period entirely.
+- **Jazzmin admin** (`admin.py`): `User`/`Profile`/`Setting`/`AccountDeletionRequest` registrations
+  with approve/reject actions on deletion requests, gated by the same admin posture switch as the
+  DRF admin surface.
+- **`fa` locale catalog** (`locale/fa/LC_MESSAGES/django.po`/`.mo`) for the Django-admin-facing
+  surface — model `verbose_name`/`help_text`, `Meta.verbose_name`/`verbose_name_plural`,
+  `AccountDeletionRequest.Status` labels, and `admin.py`'s action descriptions/messages. Matches
+  `cleanup_app`'s own precedent: the DRF/API-layer surface is not translated.
+- **Frontend SDK** (`@hjtdev/django-dynamic-user`, `frontend/`): 20 typed React hooks over both API
   surfaces — 10 self-service (`useMe`, `useMyProfile`, `useUpdateMyProfile`, `useMySetting`,
   `useUpdateMySetting`, `usePublicProfiles`, `usePublicProfile`, `useMyDeletionRequest`,
   `useRequestDeletion`, `useCancelDeletionRequest`) and 10 admin (`useAdminUsers`, `useAdminUser`,
@@ -21,46 +72,38 @@ that entry gets built from, not a substitute for it.
   `useUpdateAdminUserSetting`, `useAdminDeletionRequests`, `useReviewDeletionRequest`,
   `useFinalizeDeletionRequest`) — plus `dynamicUserKeys`/`dynamicUserAdminKeys` query-key
   factories, generated from `backend/schema.yml` via `openapi-typescript`. Types only against
-  `@hjtdev/appkit`'s shared `HttpClient`/`ApiClientProvider`/`useApiClient` — no bundled client.
+  `@hjtdev/appkit`'s shared `HttpClient`/`ApiClientProvider`/`useApiClient` — no bundled client;
+  `react`, `@tanstack/react-query`, and `@hjtdev/appkit` are `peerDependencies` only. Every
+  destructive/admin mutation hook is proven, by test, never to fire on mount or a passive render.
+- **Playground** (`playground/`, dev-only, not published): a two-host verification harness —
+  `playground/default` runs this app's own concrete models with `hard_delete` and the Celery
+  finalize path; `playground/subclassed` runs a host's `core.User`/`Profile`/`Setting`
+  subclasses with `anonymize` and the management-command finalize path — proving the subclassed
+  host's extra field round-trips over real HTTP with zero package-level code changes.
+- **CI** (`.github/workflows/ci.yml`): the org-level reusable-workflow caller
+  (`docs/APP-DESIGN.md` §10.2), `package-name: dynamic_user`, 85% coverage gate, both `celery` and
+  `avatar` extras exercised, `publish-npm: true`, plus this repo's own `publish-pypi` job.
 
-  **Host action:** wire **two** `basePaths` entries on `ApiClientProvider`, not one —
-  `dynamic_user` → `/api/v1/users` (self-service) and `dynamic_user_admin` →
-  `/api/v1/admin/users` (admin). A host that wires only `dynamic_user` will see every admin hook
-  404 or hit the self-service prefix instead.
-- Admin DRF API (`admin_views.py`): full read/write over every user, profile, setting, and the
-  account-deletion review/finalize flow, gated by `IsDynamicUserAdmin`
-  (`DYNAMIC_USER["ADMIN_REQUIRES_SUPERUSER"]`-aware).
-- `CanEscalatePrivilege` — rejects any admin `PATCH` touching `is_staff`/`is_superuser`/
-  `is_active`/`groups`/`user_permissions` unless the caller is an actual superuser, independent
-  of `ADMIN_REQUIRES_SUPERUSER`.
-- `IsSuperUser` gate on `POST /deletion-requests/{id}/finalize/` — superuser-only regardless of
-  `ADMIN_REQUIRES_SUPERUSER`, since it bypasses the deletion grace period entirely.
-- `fa` locale catalog (`locale/fa/LC_MESSAGES/django.po`/`.mo`) for the Django-admin-facing
-  surface — model `verbose_name`/`help_text`, `Meta.verbose_name`/`verbose_name_plural`,
-  `AccountDeletionRequest.Status` labels, and `admin.py`'s action descriptions/messages. Matches
-  `cleanup_app`'s own precedent: the DRF/API-layer surface is not translated.
+### Host action
 
-### Changed
-- `views_admin.py` (a Phase 1 stub, never wired to anything) removed — the DRF admin API lives in
-  `admin_views.py`, per `docs/APP-DESIGN.md` §5 and `docs/CONTRACT.md` §10 item 16.
-- `get_admin_profile_serializer()`/`get_admin_setting_serializer()` now pin `user` read-only —
-  still a full-fields `build_serializer()` call, but an admin `PATCH` can no longer reassign a
-  Profile/Setting row's owner (`docs/CONTRACT.md` §10 item 17).
-- Every serializer accessor wired to a `views.py`/`admin_views.py` schema call now emits a pinned,
-  human-readable OpenAPI component name (`MeUser`, `AdminProfile`, `PublicProfile`, ...) instead
-  of `build_serializer()`'s content-hashed class name — the shipped `frontend/src/schema.d.ts`
-  type names no longer churn when a host edits a `DYNAMIC_USER` field allowlist
-  (`docs/CONTRACT.md` §10 item 20). Not a `Host action`: nothing published these hashed names
-  before this release, so no host code can be referencing them.
-- `GET /deletion-requests/`'s `status` filter is now declared in `backend/schema.yml`
-  (`docs/CONTRACT.md` §10 item 19) — was already implemented and tested, just missing from the
-  OpenAPI schema, so the generated `AdminDeletionRequestsParams` type silently omitted it.
+Every item below is a real installation requirement, not an upgrade note — there is no prior
+version to upgrade from, but a fresh install needs all four. Each is documented in full in
+`README.md`'s config block; this list exists so they're findable in one place.
 
-  **Host action:** add the eight `dynamic_user_admin_*` throttle scopes to
-  `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]`, alongside the six self-service ones already
-  required since Phase 5 — `dynamic_user_admin_users_list`, `dynamic_user_admin_user_retrieve`,
+- Add all 14 throttle scopes to `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]`: six self-service
+  (`dynamic_user_me`, `dynamic_user_profile_retrieve`, `dynamic_user_profiles_list`,
+  `dynamic_user_profile_update`, `dynamic_user_setting_update`, `dynamic_user_deletion_request`)
+  and eight admin (`dynamic_user_admin_users_list`, `dynamic_user_admin_user_retrieve`,
   `dynamic_user_admin_user_update`, `dynamic_user_admin_profile_update`,
   `dynamic_user_admin_setting_update`, `dynamic_user_admin_deletions_list`,
-  `dynamic_user_admin_deletion_review`, `dynamic_user_admin_deletion_finalize`. Without them,
-  every request to the new admin endpoints raises at request time (`appkit`'s own `W004` check
-  flags the gap at `manage.py check` time first, if run before the first request does).
+  `dynamic_user_admin_deletion_review`, `dynamic_user_admin_deletion_finalize`). Without them,
+  every request to these endpoints raises at request time.
+- Wire `appkit`'s request-id middleware, `standard_exception_handler`, and `DefaultPagination`
+  into `MIDDLEWARE`/`REST_FRAMEWORK`.
+- Wire **two** `basePaths` entries on `ApiClientProvider`, not one — `dynamic_user` →
+  `/api/v1/users` (self-service) and `dynamic_user_admin` → `/api/v1/admin/users` (admin). A host
+  that wires only `dynamic_user` will see every admin hook 404 or hit the self-service prefix
+  instead.
+- `DYNAMIC_USER["DELETION_MODE"] = "anonymize"` requires `DELETION_ANONYMIZE_FUNCTION` set, or
+  `DeletionService.finalize()` raises `ImproperlyConfigured` — irrelevant to a host using the
+  default `DELETION_MODE`, but confirm before relying on anonymize mode in production.

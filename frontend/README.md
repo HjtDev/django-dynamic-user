@@ -474,33 +474,17 @@ the package root — there is no other entrypoint, and no provider export (the h
 
 ---
 
-## Where this README, `docs/CONTRACT.md`, and the code disagree
+## Where this README and `docs/CONTRACT.md` disagree
 
-Code is the source of truth throughout this document; the following are the specific spots where
-an existing doc said something the code doesn't actually do. None of these are fixed here — they
-are reported for a follow-up change.
+Code is the source of truth throughout this document. Phase 9 found four such spots; Phase 10
+resolved three of them (`USER_EDITABLE_FIELDS`'s false "admin baseline" claim was corrected in
+`docs/CONTRACT.md` §6 and `dynamic_user/conf.py`'s own comment, CI now exists, and the version
+below is current). One remains, kept here as an accurate record rather than a discrepancy to fix:
 
-1. **`USER_EDITABLE_FIELDS` has no consumer at all, despite both `docs/CONTRACT.md` §6 and
-   `dynamic_user/conf.py`'s own module docstring claiming it doubles as "the admin PATCH
-   allowlist baseline."** `serializers.get_user_editable_serializer()` (`serializers.py:352`) has
-   zero call sites anywhere in `views.py`/`admin_views.py`. Admin `PATCH /{id}/` goes through
-   `get_admin_user_serializer()` (`admin_views.py:155`), which builds from the model's full field
-   set, not this allowlist. This README documents the setting as unused-by-default and reserved
-   for a future self-service `/me/` `PATCH`, dropping the false "admin baseline" half of the
-   claim. `CONTRACT.md` §6 should be corrected to match.
-2. **`ChangeLogEntry` is defined in `models.py`, not `mixins.py`.** `CONTRACT.md` §1 shows it
+1. **`ChangeLogEntry` is defined in `models.py`, not `mixins.py`.** `CONTRACT.md` §1 shows it
    inside the mixins code block. This is already recorded in `CONTRACT.md` §10 item 15 as a
    deliberate deviation (Django only auto-discovers models from `models.py`) — flagged here only
    to confirm the register entry is accurate, not to re-litigate it.
-3. **No CI exists yet.** `docs/APP-DESIGN.md` §8 describes a `readme-contract` CI job that fails
-   the build if `backend/README.md`/`frontend/README.md` drift from this file. `.github/
-   workflows/` doesn't exist in this repo yet — it's Phase 10's deliverable. Until then, `make
-   sync-readmes` is the only thing keeping the three files in sync; it was run at the end of this
-   phase, so all three currently agree.
-4. **Version.** This README documents install ranges (`>=1.0,<2.0` / npm's semver default) that
-   assume a `v1.0.0` tag. `backend/pyproject.toml` and `frontend/package.json` are both still
-   `0.1.0`, and `CHANGELOG.md` has no `[1.0.0]` entry yet — tagging and the version bump are
-   Phase 10's job, not a discrepancy to fix here.
 
 No other disagreements were found across the `DYNAMIC_USER` key table (all 20 keys, verified
 against `conf.py DEFAULTS`), the six signal payloads, the seven service signatures, every
