@@ -657,22 +657,38 @@ export const dynamicUserKeys = {
   myProfile: () => [...dynamicUserKeys.all, "profile"] as const,
   mySetting: () => [...dynamicUserKeys.all, "setting"] as const,
   publicProfiles: (params?: PublicProfilesParams) =>
-    [...dynamicUserKeys.all, "profiles", params] as const,
+    params === undefined
+      ? ([...dynamicUserKeys.all, "profiles"] as const)
+      : ([...dynamicUserKeys.all, "profiles", params] as const),
   publicProfile: (id: number) => [...dynamicUserKeys.all, "profiles", id] as const,
   myDeletionRequest: () => [...dynamicUserKeys.all, "deletion-request"] as const,
 };
 
 export const dynamicUserAdminKeys = {
   all: ["dynamic_user_admin"] as const,
-  users: (params?: AdminUsersParams) => [...dynamicUserAdminKeys.all, "users", params] as const,
+  users: (params?: AdminUsersParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "users"] as const)
+      : ([...dynamicUserAdminKeys.all, "users", params] as const),
   user: (id: number) => [...dynamicUserAdminKeys.all, "users", id] as const,
   userProfile: (id: number) => [...dynamicUserAdminKeys.all, "users", id, "profile"] as const,
   userSetting: (id: number) => [...dynamicUserAdminKeys.all, "users", id, "setting"] as const,
   deletionRequests: (params?: AdminDeletionRequestsParams) =>
-    [...dynamicUserAdminKeys.all, "deletion-requests", params] as const,
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "deletion-requests"] as const)
+      : ([...dynamicUserAdminKeys.all, "deletion-requests", params] as const),
   deletionRequest: (id: number) => [...dynamicUserAdminKeys.all, "deletion-requests", id] as const,
 };
 ```
+
+**Why the conditional form, not the flatter `[...all, "profiles", params]` shape it might look
+like it should be:** `invalidateQueries`'s key matching is a prefix match with partial deep
+equality at each position. A no-argument call under the flat form emits a length-3 key ending in
+a literal `undefined` (`["dynamic_user", "profiles", undefined]`), which is compared
+position-by-position against a *filtered* live query's own key
+(`["dynamic_user", "profiles", {page: 2}]`) and never matches — silently defeating every
+`invalidateQueries({ queryKey: dynamicUserKeys.publicProfiles() })`-style call a mutation makes.
+Dropping the `params` slot entirely on a no-argument call fixes this; see §10 item 18.
 
 Five mutation hooks must never fire on mount, only from an explicit `mutate()` call
 (`APP-DESIGN.md` §12's frontend security checklist): `useRequestDeletion`,
@@ -875,6 +891,48 @@ Everything not listed here is unchanged from
     controls. `user` stays visible on `GET`, is excluded from `read_only_fields=()`'s empty
     default and instead passed `("user",)` — still a full-fields `build_serializer()` call
     through the Phase 4 factory, per §5's own requirement, just with one field pinned read-only.
+18. **Both §7 key factories drop the `params` slot entirely on a no-argument call**, rather than
+    the flatter `[...all, "profiles", params]` shape the Phase 0 hook-list prompt's illustrative
+    code implied. Discovered building Phase 7: the flat form emits a length-3 key ending in a
+    literal `undefined` on every no-argument call (`["dynamic_user", "profiles", undefined]`),
+    which `invalidateQueries`'s prefix-match-with-partial-deep-equality never matches against a
+    *filtered* live query's own key (`["dynamic_user", "profiles", {page: 2}]`) — silently
+    defeating exactly the invalidations §7's own tables document (`useUpdateAdminUser`'s
+    `dynamicUserAdminKeys.users()`, and both deletion-review/finalize hooks' `deletionRequests()`
+    call). `cleanup_app` hit this same bug building its own key factory; its fix — a
+    `params === undefined` branch — is the one adopted here. Guarded by
+    `tests/frontend/invalidation.test.tsx`, which fails if the flat form is reintroduced.
+19. **`admin_users_list`'s and `admin_users_deletion_requests_list`'s query parameters are now
+    declared in `schema.yml`, not just implemented in `get_queryset()`.** Building Phase 7's
+    generated TypeScript surfaced that `status` (deletion-request list) and the dynamic
+    field-filter (`AdminUserListView`, via `_filterable_user_fields()`) were real, tested backend
+    behavior with no OpenAPI `parameters=` entry — `openapi-typescript` would otherwise only see
+    `page`/`page_size`, silently narrowing the generated `AdminUsersParams`/
+    `AdminDeletionRequestsParams` types below what the API actually accepts. `status` is now a
+    declared enum parameter (`AccountDeletionRequest.Status.values`), matching `cleanup_app`'s own
+    precedent for the identical gap on its `CleanupRun` list endpoint. The admin user-list filter
+    fields remain **undeclared** in the schema, deliberately: they're resolved from the *host's*
+    resolved user model at request time (`_filterable_user_fields()`), so no fixed OpenAPI union
+    could ever be correct for every host — `AdminUsersParams` documents this in a comment and
+    stays intentionally open (`Record<string, string | number | boolean | undefined>`) rather than
+    enumerating a set that would already be wrong for a subclassed `User`.
+20. **Every §7 serializer accessor wired to a `views.py`/`admin_views.py` `extend_schema(...)`
+    call now carries a pinned OpenAPI component name**, via a new
+    `serializers._with_component_name()` helper (a cached, empty subclass carrying
+    `@extend_schema_serializer(component_name=...)`, mirroring `get_public_profile_serializer()`'s
+    own `WithUser`-subclass caching pattern) — `MeUser`, `PublicUser`, `MeProfile`,
+    `MeProfileUpdate`, `PublicProfile`, `MeSetting`, `MeSettingUpdate`, `AdminUser`,
+    `AdminProfile`, `AdminSetting`. Building Phase 7 surfaced that `build_serializer()`'s
+    content-hashed class names (`_generated_name()`, e.g. `User3DA8C8`, `ProfileFDEB75`,
+    `Profile5CEF83SerializerWithUser`) become drf-spectacular's OpenAPI component names by
+    default, and therefore the generated TypeScript type names in `frontend/src/schema.d.ts` — a
+    host editing any `DYNAMIC_USER` field allowlist changes the hash, and therefore the shipped
+    type name, exactly the unstable-component-name failure `APP-DESIGN.md` §12 warns against.
+    `build_serializer()`'s own signature and `_generated_name()`'s hashed Python class name are
+    both unchanged — this pins only the separate, downstream OpenAPI component name each accessor
+    emits. `get_user_editable_serializer()` is **not** wrapped: it is never reached by an
+    `extend_schema(...)` call (§10 item 3 already flags it as unused by any Phase-5 view), so no
+    hashed name from it ever reaches the schema in the first place.
 
 ---
 

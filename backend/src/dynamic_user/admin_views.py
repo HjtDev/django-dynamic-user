@@ -26,7 +26,7 @@ from appkit.pagination import DefaultPagination
 from appkit.validation import safe_filter_kwargs, validate_query_params
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import extend_schema, extend_schema_view
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -34,6 +34,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from dynamic_user import resolution, serializers
+from dynamic_user.models import AccountDeletionRequest
 from dynamic_user.permissions import CanEscalatePrivilege, IsDynamicUserAdmin, IsSuperUser
 from dynamic_user.serializers import (
     AdminDeletionRequestFilterSerializer,
@@ -80,8 +81,15 @@ def _filterable_user_fields(model: type[Any]) -> frozenset[str]:
 @extend_schema_view(
     get=extend_schema(
         summary="List users (admin)",
-        description="Paginated, filterable list of every user. USER_READ_FIELDS-shaped full "
-        "fields except password.",
+        description=(
+            "Paginated, filterable list of every user. USER_READ_FIELDS-shaped full fields "
+            "except password. Beyond page/page_size, any concrete, non-relation field on the "
+            "resolved user model is accepted as an exact-match query filter (?field=value) — "
+            "see _filterable_user_fields(). That set is host-dependent (a subclassed User model "
+            "adds its own fields), so it cannot be enumerated as fixed OpenAPI parameters here; "
+            "the frontend SDK's AdminUsersParams type is intentionally open-ended for the same "
+            "reason."
+        ),
         responses=serializers.get_admin_user_serializer(),
         tags=["dynamic-user-admin"],
     )
@@ -255,6 +263,20 @@ class AdminUserSettingView(generics.RetrieveUpdateAPIView[Any]):
     get=extend_schema(
         summary="List account-deletion requests (admin)",
         description="Paginated, filterable by status.",
+        # get_queryset() below reads `status` (validated by AdminDeletionRequestFilterSerializer)
+        # but it's not a DRF filter_backend/pagination param drf-spectacular can infer on its
+        # own — undeclared here, it would silently vanish from schema.yml and therefore from the
+        # frontend SDK's generated AdminDeletionRequestsParams type.
+        parameters=[
+            OpenApiParameter(
+                "status",
+                str,
+                OpenApiParameter.QUERY,
+                required=False,
+                enum=AccountDeletionRequest.Status.values,
+                description="Filter by status.",
+            ),
+        ],
         responses=AdminDeletionRequestSerializer,
         tags=["dynamic-user-admin"],
     )
@@ -268,8 +290,6 @@ class AdminDeletionRequestListView(generics.ListAPIView[Any]):
     serializer_class = AdminDeletionRequestSerializer
 
     def get_queryset(self) -> Any:
-        from dynamic_user.models import AccountDeletionRequest
-
         query = validate_query_params(
             AdminDeletionRequestFilterSerializer, self.request.query_params
         )
