@@ -126,17 +126,20 @@ messages:
 compilemessages:
 	cd backend/src/dynamic_user && msgfmt --check locale/fa/LC_MESSAGES/django.po -o locale/fa/LC_MESSAGES/django.mo
 
-# Phase 8 — docs/APP-DESIGN.md §11.2. Run from the repo root (docker-compose.yml's build
-# contexts assume it). `npm install`/`frontend` build first so the SDK's dist/ is fresh — it's
-# path-linked via the npm workspace, not published, so a stale dist/ from a previous checkout
-# would otherwise go unnoticed until the frontend container fails at runtime instead of at
-# build. This app's playground is two hosts (a default-models host and a subclassed-models
-# host, per docs/CLAUDE-CODE-GUIDE-APP-DYNAMIC-USER.md Phase 8) — these targets bring up
-# whichever compose file(s) Phase 8 actually lands; revisit them once that layout exists.
+# Phase 8 — docs/APP-DESIGN.md §11.2 / docs/CLAUDE-CODE-GUIDE-APP-DYNAMIC-USER.md Phase 8. Run
+# from the repo root (docker-compose.yml's build contexts assume it). `npm install`/`frontend`
+# build first so the SDK's dist/ is fresh — it's path-linked via the npm workspace, not
+# published, so a stale dist/ from a previous checkout would otherwise go unnoticed until a
+# frontend container fails at runtime instead of at build. Two hosts, one compose file
+# (playground/docker-compose.yml's own header comment explains why one, not two) — `uv sync`
+# runs in BOTH host backends before the containers build, same reasoning as frontend's build
+# step: each pyproject.toml path-links ../../../backend, and uv.lock must exist and be current
+# for `uv sync --no-dev` inside the Dockerfile to reproduce it exactly.
 playground-up:
 	npm install
 	cd frontend && npm run build
-	cd playground/backend && uv sync
+	cd playground/default/backend && uv sync
+	cd playground/subclassed/backend && uv sync
 	docker compose -f playground/docker-compose.yml up -d --build --wait
 
 playground-down:
@@ -145,6 +148,7 @@ playground-down:
 playground-logs:
 	docker compose -f playground/docker-compose.yml logs -f
 
-# Re-seeds demo users/profiles/settings without tearing the stack down.
+# Re-seeds demo users/profiles/settings on BOTH hosts without tearing the stack down.
 playground-reset:
-	docker compose -f playground/docker-compose.yml exec backend python manage.py seed_users --reset
+	docker compose -f playground/docker-compose.yml exec backend-default python manage.py seed_users --reset
+	docker compose -f playground/docker-compose.yml exec backend-subclassed python manage.py seed_users --reset
