@@ -333,7 +333,7 @@ wheels = [
 
 [[package]]
 name = "django-dynamic-user"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "django" },

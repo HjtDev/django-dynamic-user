@@ -1,6 +1,6 @@
 {
   "name": "@hjtdev/django-dynamic-user",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Swappable User/Profile/Setting data layer SDK for django-dynamic-user — typed hooks over both the self-service (/api/v1/users) and admin (/api/v1/admin/users) surfaces, generated from the backend's own OpenAPI schema.",
   "license": "MIT",
   "type": "module",

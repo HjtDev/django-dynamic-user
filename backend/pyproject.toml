@@ -13,10 +13,10 @@ build-backend = "setuptools.build_meta"
 # `hjtdev-appkit` / `import appkit` and cleanup_app ships `hjtdev-django-cleanup` /
 # `import cleanup_app`. docs/CONTRACT.md §0.
 name = "django-dynamic-user"
-# Kept in lockstep with frontend/package.json and CHANGELOG.md's [1.0.0] heading — CI's
+# Kept in lockstep with frontend/package.json and CHANGELOG.md's [1.0.1] heading — CI's
 # version-lockstep job enforces all three agreeing (this repo's CLAUDE.md "Both halves release
 # under one tag" rule).
-version = "1.0.0"
+version = "1.0.1"
 description = "Swappable User/Profile/Setting data layer for a host Django project, as an installable app package."
 # Points at THIS directory's own README.md, not the repo-root one one level up — setuptools
 # reads `readme` relative to pyproject.toml, and a monorepo's sdist build has no reliable access
