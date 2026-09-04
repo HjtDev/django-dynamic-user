@@ -5,6 +5,7 @@ views' ``request.user``)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,12 +14,17 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.test import Client
 from django.urls import reverse
+from django.utils import translation
 
 from dynamic_user.admin import UserChangeForm
 from dynamic_user.models import AccountDeletionRequest, ChangeLogEntry
 from dynamic_user.resolution import get_profile_model, get_setting_model
 
 pytestmark = pytest.mark.django_db
+
+MO_PATH = (
+    Path(__file__).resolve().parents[2] / "backend/src/dynamic_user/locale/fa/LC_MESSAGES/django.mo"
+)
 
 
 def test_user_setting_profile_deletion_changelog_are_all_registered() -> None:
@@ -147,3 +153,22 @@ def _fake_request(acting_user: Any) -> Any:
     request = RequestFactory().get("/")
     request.user = acting_user
     return request
+
+
+# ------------------------------------------------------------------------------------ locale
+
+
+def test_fa_catalog_is_compiled_on_disk() -> None:
+    """A committed ``.po`` alone is not enough — CI's wheel-smoke-test looks for a real ``.mo``
+    in the built wheel, and this asserts the source of truth for that is actually present.
+    """
+    assert MO_PATH.is_file()
+    assert MO_PATH.stat().st_size > 0
+
+
+def test_fa_translation_renders() -> None:
+    with translation.override("fa"):
+        assert str(translation.gettext("username")) == "نام کاربری"
+        assert str(translation.gettext("Approve selected deletion requests")) == (
+            "تأیید درخواست‌های حذف انتخاب‌شده"
+        )

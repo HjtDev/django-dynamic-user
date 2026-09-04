@@ -611,6 +611,61 @@ going through `CanEscalatePrivilege` first; `/deletion-requests/{id}/finalize/` 
 non-superuser; the Jazzmin admin's own approve/reject action (Phase 2) bypassing
 `DeletionService` and mutating the row directly.
 
+### Phase 6.5 — i18n retrofit (fa locale)
+
+Not part of the original phase sequence — added after Phase 6 shipped, once it became clear
+`locale/` held only a `.gitkeep` despite the Makefile's `messages`/`compilemessages` targets
+already assuming a real catalog, and `apps.py`'s `verbose_name` was the only translatable string
+in the whole package.
+
+```
+i18n retrofit: translate the Django-admin-facing surface into fa, matching cleanup_app's own
+precedent exactly (the only other app in this ecosystem shipping a locale/fa) — NOT a new
+convention. Read cleanup_app/backend/src/cleanup_app/{models,admin}.py first for the shape to
+mirror.
+
+In scope: models.py (verbose_name on every field this package itself defines, help_text only
+where the field's purpose isn't obvious from its name, Meta.verbose_name/verbose_name_plural on
+every model, AccountDeletionRequest.Status's four TextChoices members getting real _() labels),
+mixins.py (same, for every field-bearing mixin), admin.py (the two @admin.action descriptions,
+and _review_selected's three messages.* calls restructured through
+django.utils.translation.ngettext for the two count-bearing ones).
+
+Explicitly out of scope, matching cleanup_app: services.py, views.py, admin_views.py,
+permissions.py, checks.py, validators.py — DRF/API-layer strings stay in English. Do not
+translate DeletionRequestAlreadyExists/InvalidDeletionState, CanEscalatePrivilege's denial
+message, or any system-check Error() message without a deliberate, separately-confirmed decision
+to break from that precedent.
+
+Migration handling: verbose_name/help_text/TextChoices labels are part of Django's migration
+state. Run `makemigrations --check --dry-run -v3` against every settings module that has its own
+migrated app subclassing these abstract bases (tests.backend.settings for dynamic_user itself +
+mixin_app's Widget, tests.backend.settings_swapped for swapped_app, settings_partial_swap for
+partial_app, settings_user_swap for user_swap_app) — each will report a real, tool-generated diff
+the first time. Amend each app's already-merged 0001_initial.py in place using that diff as the
+literal source of truth for field kwargs (never guessed by hand), rather than adding a
+0002_alter_*.py — safe only pre-v1.0.0, before any tagged release/real host has migrated against
+it. Re-run --check --dry-run after each amend until every settings module reports "No changes
+detected".
+
+Then: `make messages` to regenerate the .po skeleton from source (real #: file:line references,
+correct POT-Creation-Date — never hand-write these), fill every msgstr with Persian translations,
+`make compilemessages` (msgfmt --check). Two tests in test_admin.py, mirroring
+cleanup_app/tests/backend/test_admin_orphans.py's own locale section: the compiled .mo exists and
+is non-empty, and translation.override("fa") + translation.gettext(...) round-trips at least one
+model-label string and one admin-action-description string.
+
+Run pytest against every settings module, paste coverage. Run make lint/typecheck.
+```
+
+**Verify:** `makemigrations --check --dry-run` reports no changes under every settings module
+listed above; both locale tests pass; `make test`'s coverage gate still clears 85%.
+
+**Review for:** any DRF/API-layer string (services.py/views.py/admin_views.py/permissions.py)
+accidentally wrapped in `gettext_lazy` — that would silently expand this unit's scope beyond the
+cleanup_app precedent it's supposed to match; a migration file edited by hand that doesn't
+actually match `makemigrations --check --dry-run`'s real diff.
+
 ### Phase 7 — Frontend SDK
 
 ```

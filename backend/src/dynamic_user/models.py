@@ -32,6 +32,7 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 from .managers import UserManager
 
@@ -42,13 +43,24 @@ class AbstractDynamicUser(AbstractBaseUser, PermissionsMixin):
     :class:`~django.contrib.auth.models.PermissionsMixin` — not redeclared here.
     """
 
-    username = models.CharField(max_length=150, unique=True)
-    name = models.CharField(max_length=150, blank=True)
-    email = models.EmailField(unique=True)
-    phone = models.CharField(max_length=32, unique=True, null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    is_staff = models.BooleanField(default=False)
-    date_joined = models.DateTimeField(auto_now_add=True)
+    username = models.CharField(_("username"), max_length=150, unique=True)
+    name = models.CharField(_("name"), max_length=150, blank=True)
+    email = models.EmailField(_("email address"), unique=True)
+    phone = models.CharField(_("phone number"), max_length=32, unique=True, null=True, blank=True)
+    is_active = models.BooleanField(
+        _("active"),
+        default=True,
+        help_text=_(
+            "Designates whether this user should be treated as active. "
+            "Unselect this instead of deleting accounts."
+        ),
+    )
+    is_staff = models.BooleanField(
+        _("staff status"),
+        default=False,
+        help_text=_("Designates whether the user can log into this admin site."),
+    )
+    date_joined = models.DateTimeField(_("date joined"), auto_now_add=True)
 
     objects = UserManager()
 
@@ -61,6 +73,8 @@ class AbstractDynamicUser(AbstractBaseUser, PermissionsMixin):
 
     class Meta:
         abstract = True
+        verbose_name = _("user")
+        verbose_name_plural = _("users")
         indexes = [  # noqa: RUF012 -- Django's Meta.indexes is inherently a plain list, not an
             # instance attribute a subclass ever mutates; ClassVar doesn't apply to Meta.
             models.Index(fields=["email"]),
@@ -84,13 +98,22 @@ class AbstractProfile(models.Model):
     """
 
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile"
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("user"),
+        on_delete=models.CASCADE,
+        related_name="profile",
     )
-    bio = models.TextField(blank=True)
-    is_public = models.BooleanField(default=True)
+    bio = models.TextField(_("bio"), blank=True)
+    is_public = models.BooleanField(
+        _("public"),
+        default=True,
+        help_text=_("Whether this profile is visible to other users."),
+    )
 
     class Meta:
         abstract = True
+        verbose_name = _("profile")
+        verbose_name_plural = _("profiles")
 
     def __str__(self) -> str:
         return f"Profile<{self.user_id}>"
@@ -106,14 +129,23 @@ class AbstractSetting(models.Model):
     minimal — a host's own subclass is where project-specific preferences go."""
 
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="setting"
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("user"),
+        on_delete=models.CASCADE,
+        related_name="setting",
     )
-    language = models.CharField(max_length=10, default="en")
-    timezone = models.CharField(max_length=64, default="UTC")
-    notifications_enabled = models.BooleanField(default=True)
+    language = models.CharField(_("language"), max_length=10, default="en")
+    timezone = models.CharField(_("timezone"), max_length=64, default="UTC")
+    notifications_enabled = models.BooleanField(
+        _("notifications enabled"),
+        default=True,
+        help_text=_("Whether this user receives notifications."),
+    )
 
     class Meta:
         abstract = True
+        verbose_name = _("setting")
+        verbose_name_plural = _("settings")
 
     def __str__(self) -> str:
         return f"Setting<{self.user_id}>"
@@ -130,28 +162,38 @@ class AccountDeletionRequest(models.Model):
     ``DYNAMIC_USER_DELETION_REQUEST_MODEL`` is introduced."""
 
     class Status(models.TextChoices):
-        PENDING = "pending"
-        APPROVED = "approved"
-        REJECTED = "rejected"
-        FINALIZED = "finalized"
+        PENDING = "pending", _("Pending")
+        APPROVED = "approved", _("Approved")
+        REJECTED = "rejected", _("Rejected")
+        FINALIZED = "finalized", _("Finalized")
 
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="deletion_requests"
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("user"),
+        on_delete=models.CASCADE,
+        related_name="deletion_requests",
     )
-    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
-    reason = models.TextField(blank=True)
-    requested_at = models.DateTimeField(auto_now_add=True)
-    reviewed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        _("status"), max_length=10, choices=Status.choices, default=Status.PENDING
+    )
+    reason = models.TextField(
+        _("reason"), blank=True, help_text=_("Optional reason provided by the user.")
+    )
+    requested_at = models.DateTimeField(_("requested at"), auto_now_add=True)
+    reviewed_at = models.DateTimeField(_("reviewed at"), null=True, blank=True)
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        verbose_name=_("reviewed by"),
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="reviewed_deletion_requests",
     )
-    finalize_at = models.DateTimeField(null=True, blank=True)
+    finalize_at = models.DateTimeField(_("finalize at"), null=True, blank=True)
 
     class Meta:
+        verbose_name = _("account deletion request")
+        verbose_name_plural = _("account deletion requests")
         indexes = [  # noqa: RUF012 -- see AbstractDynamicUser.Meta's own indexes above
             models.Index(fields=["status", "finalize_at"]),
             models.Index(fields=["user", "status"]),
@@ -169,18 +211,27 @@ class ChangeLogEntry(models.Model):
     See this module's docstring for why it lives here rather than in ``mixins.py``.
     """
 
-    content_type = models.ForeignKey("contenttypes.ContentType", on_delete=models.CASCADE)
-    object_id = models.PositiveBigIntegerField()
+    content_type = models.ForeignKey(
+        "contenttypes.ContentType", verbose_name=_("content type"), on_delete=models.CASCADE
+    )
+    object_id = models.PositiveBigIntegerField(_("object id"))
     content_object = GenericForeignKey("content_type", "object_id")
     actor = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("actor"),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        help_text=_("The user who made this change, if known."),
     )
-    field_name = models.CharField(max_length=100)
-    old_value = models.TextField(blank=True)
-    new_value = models.TextField(blank=True)
-    changed_at = models.DateTimeField(auto_now_add=True)
+    field_name = models.CharField(_("field name"), max_length=100)
+    old_value = models.TextField(_("old value"), blank=True)
+    new_value = models.TextField(_("new value"), blank=True)
+    changed_at = models.DateTimeField(_("changed at"), auto_now_add=True)
 
     class Meta:
+        verbose_name = _("change log entry")
+        verbose_name_plural = _("change log entries")
         # See AbstractDynamicUser.Meta's own indexes for why this noqa is here.
         indexes = [models.Index(fields=["content_type", "object_id"])]  # noqa: RUF012
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -40,8 +41,14 @@ class AvatarMixin(models.Model):
     avatar composes it itself, e.g. ``class Profile(AbstractProfile, AvatarMixin): ...``.
     """
 
-    avatar = models.ImageField(upload_to="dynamic_user/avatars/", blank=True, null=True)
-    avatar_updated_at = models.DateTimeField(null=True, blank=True)
+    avatar = models.ImageField(
+        _("avatar"),
+        upload_to="dynamic_user/avatars/",
+        blank=True,
+        null=True,
+        help_text=_("Profile picture."),
+    )
+    avatar_updated_at = models.DateTimeField(_("avatar updated at"), null=True, blank=True)
 
     class Meta:
         abstract = True
@@ -50,8 +57,8 @@ class AvatarMixin(models.Model):
 class TimestampMixin(models.Model):
     """Adds ``created_at``/``updated_at``. No ``Meta`` requirement on the composing model."""
 
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(_("created at"), auto_now_add=True)
+    updated_at = models.DateTimeField(_("updated at"), auto_now=True)
 
     class Meta:
         abstract = True
@@ -108,8 +115,10 @@ class SoftDeleteMixin(models.Model):
     manager.
     """
 
-    is_deleted = models.BooleanField(default=False)
-    deleted_at = models.DateTimeField(null=True, blank=True)
+    is_deleted = models.BooleanField(
+        _("deleted"), default=False, help_text=_("Whether this row is soft-deleted.")
+    )
+    deleted_at = models.DateTimeField(_("deleted at"), null=True, blank=True)
 
     class Meta:
         abstract = True
@@ -119,10 +128,10 @@ class VerificationMixin(models.Model):
     """Flags + timestamps only — no delivery logic. Sending a verification code is an
     auth-app's or host's job; this mixin just gives it somewhere to record the result."""
 
-    email_verified = models.BooleanField(default=False)
-    email_verified_at = models.DateTimeField(null=True, blank=True)
-    phone_verified = models.BooleanField(default=False)
-    phone_verified_at = models.DateTimeField(null=True, blank=True)
+    email_verified = models.BooleanField(_("email verified"), default=False)
+    email_verified_at = models.DateTimeField(_("email verified at"), null=True, blank=True)
+    phone_verified = models.BooleanField(_("phone verified"), default=False)
+    phone_verified_at = models.DateTimeField(_("phone verified at"), null=True, blank=True)
 
     class Meta:
         abstract = True
@@ -133,8 +142,8 @@ class LastSeenMixin(models.Model):
     the write-throttling described in ``DYNAMIC_USER["LAST_SEEN_UPDATE_SECONDS"]`` is a host-wired
     hook's responsibility, not something this mixin enforces itself."""
 
-    last_seen_at = models.DateTimeField(null=True, blank=True)
-    last_seen_ip = models.GenericIPAddressField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(_("last seen at"), null=True, blank=True)
+    last_seen_ip = models.GenericIPAddressField(_("last seen IP"), null=True, blank=True)
 
     class Meta:
         abstract = True
@@ -145,7 +154,9 @@ class MetadataMixin(models.Model):
     real column. Never read or written by this package's own views/serializers by default — a
     host opts a field allowlist into it explicitly."""
 
-    metadata = models.JSONField(default=dict, blank=True)
+    metadata = models.JSONField(
+        _("metadata"), default=dict, blank=True, help_text=_("Unstructured host-specific data.")
+    )
 
     class Meta:
         abstract = True
