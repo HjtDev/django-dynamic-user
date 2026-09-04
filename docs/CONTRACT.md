@@ -556,7 +556,7 @@ Django's `swappable_dependency()` machinery expects a top-level setting name:
 | Key | Default | Meaning |
 |---|---|---|
 | `USER_READ_FIELDS` | `["id", "username", "name", "email", "phone", "is_active", "date_joined"]` | Fields on `GET /me/` and the admin user read views (admin gets the full model regardless via a separate full-fields build, see §5) |
-| `USER_EDITABLE_FIELDS` | `["name", "phone"]` | Fields writable via a *future* self-service `/me/` PATCH — currently unused since `GET /me/` is read-only per §5, kept for forward-compat and admin PATCH's own allowlist baseline |
+| `USER_EDITABLE_FIELDS` | `["name", "phone"]` | Fields writable via a *future* self-service `/me/` PATCH — currently unused since `GET /me/` is read-only per §5 and admin `PATCH` builds from the model's full field set via `get_admin_user_serializer()`, not this allowlist. Kept for forward-compat; validated by `dynamic_user.E005` regardless |
 | `USER_LOCKED_FIELDS` | `["username", "email", "is_staff", "is_superuser", "is_active"]` | Subtracted from `USER_EDITABLE_FIELDS` at build time even if a host also lists one of these there — belt-and-braces, deterministic |
 | `USER_PUBLIC_FIELDS` | `["id", "username"]` | Fields on the nested `user` block of a public profile response (§5's `/profiles/`, `/profiles/{id}/`) |
 | `USER_PRIVILEGED_FIELDS` | `["is_staff", "is_superuser", "is_active", "groups", "user_permissions"]` | The exact set `CanEscalatePrivilege` (§5) gates. A host may **add** to this set via `DYNAMIC_USER["USER_PRIVILEGED_FIELDS"]` but the resolved value is always `DEFAULT ∪ host's` — the floor above can never be shrunk |
