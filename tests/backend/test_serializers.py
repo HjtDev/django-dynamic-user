@@ -217,3 +217,46 @@ def test_setting_read_serializer_is_union_of_editable_and_read_fields() -> None:
 def test_setting_edit_serializer_is_writable() -> None:
     serializer = serializers.get_setting_edit_serializer()()
     assert serializer.fields["language"].read_only is False
+
+
+# --- pinned OpenAPI component names (Phase 7) -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("accessor_name", "component_name"),
+    [
+        ("get_user_read_serializer", "MeUser"),
+        ("get_user_public_serializer", "PublicUser"),
+        ("get_profile_read_serializer", "MeProfile"),
+        ("get_profile_edit_serializer", "MeProfileUpdate"),
+        ("get_public_profile_serializer", "PublicProfile"),
+        ("get_setting_read_serializer", "MeSetting"),
+        ("get_setting_edit_serializer", "MeSettingUpdate"),
+        ("get_admin_user_serializer", "AdminUser"),
+        ("get_admin_profile_serializer", "AdminProfile"),
+        ("get_admin_setting_serializer", "AdminSetting"),
+    ],
+)
+def test_accessor_carries_its_pinned_component_name(
+    accessor_name: str, component_name: str
+) -> None:
+    """Every accessor wired to a ``views.py``/``admin_views.py`` ``extend_schema(...)`` call must
+    emit a fixed, human-readable OpenAPI component name (``frontend/src/schema.d.ts``'s type
+    names), never :func:`serializers._generated_name`'s content hash — a future refactor that
+    routes one of these accessors' return value straight through ``build_serializer()`` again,
+    bypassing :func:`serializers._with_component_name`, must fail here rather than silently
+    reintroducing a ``User3DA8C8``-style hashed component name (``docs/APP-DESIGN.md`` §12)."""
+    accessor = getattr(serializers, accessor_name)
+    serializer_cls = accessor()
+    annotation = getattr(serializer_cls, "_spectacular_annotation", None)
+    assert annotation is not None, f"{accessor_name}() is missing a pinned component name"
+    assert annotation.get("component_name") == component_name
+
+
+def test_pinned_component_name_wrapper_preserves_accessor_identity() -> None:
+    """:func:`serializers._with_component_name` must not break the ``is``-identity contract
+    :func:`test_accessor_calls_are_cached_too` already exercises on the unwrapped accessors —
+    every pinned accessor above gets its own dedicated assertion here too."""
+    assert serializers.get_user_read_serializer() is serializers.get_user_read_serializer()
+    assert serializers.get_admin_user_serializer() is serializers.get_admin_user_serializer()
+    assert serializers.get_admin_profile_serializer() is serializers.get_admin_profile_serializer()

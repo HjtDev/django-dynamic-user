@@ -7,7 +7,12 @@ paths:
     get:
       operationId: admin_users_list
       description: Paginated, filterable list of every user. USER_READ_FIELDS-shaped
-        full fields except password.
+        full fields except password. Beyond page/page_size, any concrete, non-relation
+        field on the resolved user model is accepted as an exact-match query filter
+        (?field=value) — see _filterable_user_fields(). That set is host-dependent
+        (a subclassed User model adds its own fields), so it cannot be enumerated
+        as fixed OpenAPI parameters here; the frontend SDK's AdminUsersParams type
+        is intentionally open-ended for the same reason.
       summary: List users (admin)
       parameters:
       - name: page
@@ -32,7 +37,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedUser3DA8C8List'
+                $ref: '#/components/schemas/PaginatedAdminUserList'
           description: ''
   /api/v1/admin/users/{id}/:
     get:
@@ -55,7 +60,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User3DA8C8'
+                $ref: '#/components/schemas/AdminUser'
           description: ''
     patch:
       operationId: admin_users_partial_update
@@ -74,13 +79,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedUser3DA8C8Request'
+              $ref: '#/components/schemas/PatchedAdminUserRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedUser3DA8C8Request'
+              $ref: '#/components/schemas/PatchedAdminUserRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedUser3DA8C8Request'
+              $ref: '#/components/schemas/PatchedAdminUserRequest'
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -89,7 +94,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User3DA8C8'
+                $ref: '#/components/schemas/AdminUser'
           description: ''
   /api/v1/admin/users/{id}/profile/:
     get:
@@ -112,7 +117,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProfileFDEB75'
+                $ref: '#/components/schemas/AdminProfile'
           description: ''
     patch:
       operationId: admin_users_profile_partial_update
@@ -130,13 +135,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedProfileFDEB75Request'
+              $ref: '#/components/schemas/PatchedAdminProfileRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedProfileFDEB75Request'
+              $ref: '#/components/schemas/PatchedAdminProfileRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedProfileFDEB75Request'
+              $ref: '#/components/schemas/PatchedAdminProfileRequest'
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -145,7 +150,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProfileFDEB75'
+                $ref: '#/components/schemas/AdminProfile'
           description: ''
   /api/v1/admin/users/{id}/setting/:
     get:
@@ -168,7 +173,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SettingBD019E'
+                $ref: '#/components/schemas/AdminSetting'
           description: ''
     patch:
       operationId: admin_users_setting_partial_update
@@ -186,13 +191,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedSettingBD019ERequest'
+              $ref: '#/components/schemas/PatchedAdminSettingRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedSettingBD019ERequest'
+              $ref: '#/components/schemas/PatchedAdminSettingRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedSettingBD019ERequest'
+              $ref: '#/components/schemas/PatchedAdminSettingRequest'
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -201,7 +206,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SettingBD019E'
+                $ref: '#/components/schemas/AdminSetting'
           description: ''
   /api/v1/admin/users/deletion-requests/:
     get:
@@ -221,6 +226,16 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - approved
+          - finalized
+          - pending
+          - rejected
+        description: Filter by status.
       tags:
       - dynamic-user-admin
       security:
@@ -304,7 +319,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User7C58E8'
+                $ref: '#/components/schemas/MeUser'
           description: ''
   /api/v1/users/me/deletion-request/:
     get:
@@ -379,7 +394,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProfileE086A0'
+                $ref: '#/components/schemas/MeProfile'
           description: ''
     patch:
       operationId: users_me_profile_partial_update
@@ -391,13 +406,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedProfile7940FBRequest'
+              $ref: '#/components/schemas/PatchedMeProfileUpdateRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedProfile7940FBRequest'
+              $ref: '#/components/schemas/PatchedMeProfileUpdateRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedProfile7940FBRequest'
+              $ref: '#/components/schemas/PatchedMeProfileUpdateRequest'
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -406,7 +421,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProfileE086A0'
+                $ref: '#/components/schemas/MeProfile'
           description: ''
   /api/v1/users/me/setting/:
     get:
@@ -423,7 +438,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SettingF129A3'
+                $ref: '#/components/schemas/MeSetting'
           description: ''
     patch:
       operationId: users_me_setting_partial_update
@@ -435,13 +450,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedSetting110AC7Request'
+              $ref: '#/components/schemas/PatchedMeSettingUpdateRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedSetting110AC7Request'
+              $ref: '#/components/schemas/PatchedMeSettingUpdateRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedSetting110AC7Request'
+              $ref: '#/components/schemas/PatchedMeSettingUpdateRequest'
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -450,7 +465,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SettingF129A3'
+                $ref: '#/components/schemas/MeSetting'
           description: ''
   /api/v1/users/profiles/:
     get:
@@ -481,7 +496,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedProfile5CEF83SerializerWithUserList'
+                $ref: '#/components/schemas/PaginatedPublicProfileList'
           description: ''
   /api/v1/users/profiles/{id}/:
     get:
@@ -506,7 +521,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Profile5CEF83SerializerWithUser'
+                $ref: '#/components/schemas/PublicProfile'
           description: ''
 components:
   schemas:
@@ -533,6 +548,7 @@ components:
         reason:
           type: string
           readOnly: true
+          description: Optional reason provided by the user.
         requested_at:
           type: string
           format: date-time
@@ -560,6 +576,105 @@ components:
       - reviewed_by
       - status
       - user
+    AdminProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        bio:
+          type: string
+        is_public:
+          type: boolean
+          title: Public
+          description: Whether this profile is visible to other users.
+      required:
+      - id
+      - user
+    AdminSetting:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        language:
+          type: string
+          maxLength: 10
+        timezone:
+          type: string
+          maxLength: 64
+        notifications_enabled:
+          type: boolean
+          description: Whether this user receives notifications.
+      required:
+      - id
+      - user
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+        is_superuser:
+          type: boolean
+          title: Superuser status
+          description: Designates that this user has all permissions without explicitly
+            assigning them.
+        username:
+          type: string
+          maxLength: 150
+        name:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        phone:
+          type: string
+          nullable: true
+          title: Phone number
+          maxLength: 32
+        is_active:
+          type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        is_staff:
+          type: boolean
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        groups:
+          type: array
+          items:
+            type: integer
+          description: The groups this user belongs to. A user will get all permissions
+            granted to each of their groups.
+        user_permissions:
+          type: array
+          items:
+            type: integer
+          description: Specific permissions for this user.
+      required:
+      - date_joined
+      - email
+      - id
+      - username
     DeletionRequest:
       type: object
       description: |-
@@ -579,6 +694,7 @@ components:
         reason:
           type: string
           readOnly: true
+          description: Optional reason provided by the user.
         requested_at:
           type: string
           format: date-time
@@ -612,6 +728,7 @@ components:
       properties:
         reason:
           type: string
+          description: Optional reason provided by the user.
     DeletionReviewRequest:
       type: object
       description: |-
@@ -623,6 +740,85 @@ components:
           type: boolean
       required:
       - approved
+    MeProfile:
+      type: object
+      properties:
+        bio:
+          type: string
+          readOnly: true
+        is_public:
+          type: boolean
+          readOnly: true
+          title: Public
+          description: Whether this profile is visible to other users.
+        id:
+          type: integer
+          readOnly: true
+      required:
+      - bio
+      - id
+      - is_public
+    MeSetting:
+      type: object
+      properties:
+        language:
+          type: string
+          readOnly: true
+        timezone:
+          type: string
+          readOnly: true
+        notifications_enabled:
+          type: boolean
+          readOnly: true
+          description: Whether this user receives notifications.
+        id:
+          type: integer
+          readOnly: true
+      required:
+      - id
+      - language
+      - notifications_enabled
+      - timezone
+    MeUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+          title: Email address
+        phone:
+          type: string
+          readOnly: true
+          nullable: true
+          title: Phone number
+        is_active:
+          type: boolean
+          readOnly: true
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - date_joined
+      - email
+      - id
+      - is_active
+      - name
+      - phone
+      - username
     PaginatedAdminDeletionRequestList:
       type: object
       required:
@@ -646,7 +842,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminDeletionRequest'
-    PaginatedProfile5CEF83SerializerWithUserList:
+    PaginatedAdminUserList:
       type: object
       required:
       - count
@@ -668,8 +864,8 @@ components:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/Profile5CEF83SerializerWithUser'
-    PaginatedUser3DA8C8List:
+            $ref: '#/components/schemas/AdminUser'
+    PaginatedPublicProfileList:
       type: object
       required:
       - count
@@ -691,22 +887,17 @@ components:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/User3DA8C8'
-    PatchedProfile7940FBRequest:
+            $ref: '#/components/schemas/PublicProfile'
+    PatchedAdminProfileRequest:
       type: object
       properties:
         bio:
           type: string
         is_public:
           type: boolean
-    PatchedProfileFDEB75Request:
-      type: object
-      properties:
-        bio:
-          type: string
-        is_public:
-          type: boolean
-    PatchedSetting110AC7Request:
+          title: Public
+          description: Whether this profile is visible to other users.
+    PatchedAdminSettingRequest:
       type: object
       properties:
         language:
@@ -719,20 +910,8 @@ components:
           maxLength: 64
         notifications_enabled:
           type: boolean
-    PatchedSettingBD019ERequest:
-      type: object
-      properties:
-        language:
-          type: string
-          minLength: 1
-          maxLength: 10
-        timezone:
-          type: string
-          minLength: 1
-          maxLength: 64
-        notifications_enabled:
-          type: boolean
-    PatchedUser3DA8C8Request:
+          description: Whether this user receives notifications.
+    PatchedAdminUserRequest:
       type: object
       properties:
         last_login:
@@ -755,15 +934,22 @@ components:
           type: string
           format: email
           minLength: 1
+          title: Email address
           maxLength: 254
         phone:
           type: string
           nullable: true
+          title: Phone number
           maxLength: 32
         is_active:
           type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
         is_staff:
           type: boolean
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
         groups:
           type: array
           items:
@@ -775,7 +961,30 @@ components:
           items:
             type: integer
           description: Specific permissions for this user.
-    Profile5CEF83SerializerWithUser:
+    PatchedMeProfileUpdateRequest:
+      type: object
+      properties:
+        bio:
+          type: string
+        is_public:
+          type: boolean
+          title: Public
+          description: Whether this profile is visible to other users.
+    PatchedMeSettingUpdateRequest:
+      type: object
+      properties:
+        language:
+          type: string
+          minLength: 1
+          maxLength: 10
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+        notifications_enabled:
+          type: boolean
+          description: Whether this user receives notifications.
+    PublicProfile:
       type: object
       properties:
         id:
@@ -786,84 +995,24 @@ components:
           readOnly: true
         user:
           allOf:
-          - $ref: '#/components/schemas/User6768FE'
+          - $ref: '#/components/schemas/PublicUser'
           readOnly: true
       required:
       - bio
       - id
       - user
-    ProfileE086A0:
-      type: object
-      properties:
-        bio:
-          type: string
-          readOnly: true
-        is_public:
-          type: boolean
-          readOnly: true
-        id:
-          type: integer
-          readOnly: true
-      required:
-      - bio
-      - id
-      - is_public
-    ProfileFDEB75:
+    PublicUser:
       type: object
       properties:
         id:
           type: integer
           readOnly: true
-        user:
-          type: integer
-          readOnly: true
-        bio:
+        username:
           type: string
-        is_public:
-          type: boolean
-      required:
-      - id
-      - user
-    SettingBD019E:
-      type: object
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        user:
-          type: integer
-          readOnly: true
-        language:
-          type: string
-          maxLength: 10
-        timezone:
-          type: string
-          maxLength: 64
-        notifications_enabled:
-          type: boolean
-      required:
-      - id
-      - user
-    SettingF129A3:
-      type: object
-      properties:
-        language:
-          type: string
-          readOnly: true
-        timezone:
-          type: string
-          readOnly: true
-        notifications_enabled:
-          type: boolean
-          readOnly: true
-        id:
-          type: integer
           readOnly: true
       required:
       - id
-      - language
-      - notifications_enabled
-      - timezone
+      - username
     StatusEnum:
       enum:
       - pending
@@ -876,106 +1025,6 @@ components:
         * `approved` - Approved
         * `rejected` - Rejected
         * `finalized` - Finalized
-    User3DA8C8:
-      type: object
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        last_login:
-          type: string
-          format: date-time
-          nullable: true
-        is_superuser:
-          type: boolean
-          title: Superuser status
-          description: Designates that this user has all permissions without explicitly
-            assigning them.
-        username:
-          type: string
-          maxLength: 150
-        name:
-          type: string
-          maxLength: 150
-        email:
-          type: string
-          format: email
-          maxLength: 254
-        phone:
-          type: string
-          nullable: true
-          maxLength: 32
-        is_active:
-          type: boolean
-        is_staff:
-          type: boolean
-        date_joined:
-          type: string
-          format: date-time
-          readOnly: true
-        groups:
-          type: array
-          items:
-            type: integer
-          description: The groups this user belongs to. A user will get all permissions
-            granted to each of their groups.
-        user_permissions:
-          type: array
-          items:
-            type: integer
-          description: Specific permissions for this user.
-      required:
-      - date_joined
-      - email
-      - id
-      - username
-    User6768FE:
-      type: object
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        username:
-          type: string
-          readOnly: true
-      required:
-      - id
-      - username
-    User7C58E8:
-      type: object
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        username:
-          type: string
-          readOnly: true
-        name:
-          type: string
-          readOnly: true
-        email:
-          type: string
-          format: email
-          readOnly: true
-        phone:
-          type: string
-          readOnly: true
-          nullable: true
-        is_active:
-          type: boolean
-          readOnly: true
-        date_joined:
-          type: string
-          format: date-time
-          readOnly: true
-      required:
-      - date_joined
-      - email
-      - id
-      - is_active
-      - name
-      - phone
-      - username
   securitySchemes:
     basicAuth:
       type: http

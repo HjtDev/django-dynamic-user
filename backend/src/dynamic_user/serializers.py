@@ -53,6 +53,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
 from django.dispatch import receiver
 from django.test.signals import setting_changed
+from drf_spectacular.utils import extend_schema_serializer
 from rest_framework import serializers
 
 from dynamic_user import conf, resolution
@@ -248,6 +249,54 @@ def _clear_cache_on_model_swap(sender: object, setting: str, **kwargs: Any) -> N
     """
     if setting in _CACHE_SENSITIVE_SETTINGS:
         _build_serializer.cache_clear()
+        _component_name_cache.clear()
+
+
+_component_name_cache: dict[
+    tuple[type[serializers.ModelSerializer[Any]], str], type[serializers.ModelSerializer[Any]]
+] = {}
+
+
+def _with_component_name(
+    base: type[serializers.ModelSerializer[Any]], component_name: str
+) -> type[serializers.ModelSerializer[Any]]:
+    """Wraps ``base`` in a thin, cached subclass carrying a pinned ``drf-spectacular`` OpenAPI
+    component name, via ``@extend_schema_serializer(component_name=...)``.
+
+    ``build_serializer()`` names its generated classes from a content hash
+    (:func:`_generated_name`) — deterministic within one field-set/settings combination, but a
+    host editing a ``DYNAMIC_USER`` field allowlist changes the hash, and therefore the emitted
+    OpenAPI component name, and therefore the generated TypeScript type name in
+    ``frontend/src/schema.d.ts`` — exactly the unstable-component-name failure
+    ``docs/APP-DESIGN.md`` §12 warns about. Every module-level accessor below that is wired to a
+    ``views.py``/``admin_views.py`` ``extend_schema(...)`` call (i.e. one whose name actually
+    reaches ``drf-spectacular``'s introspection) routes its return value through here, so the
+    *emitted* component name stays a fixed literal regardless of settings.
+
+    Subclasses ``base`` rather than decorating it in place — ``@extend_schema_serializer``
+    mutates the class object it's given (``drf_spectacular.utils.set_override``), and ``base`` is
+    a ``build_serializer()``-cached object two different accessors could, under an unusual
+    settings override that made their field tuples collide, legitimately share; mutating it
+    directly would let whichever accessor calls last silently win the component name for both.
+    A fresh, empty subclass sidesteps that and exactly mirrors
+    :func:`get_public_profile_serializer`'s own ``WithUser`` subclassing, done for the same
+    reason.
+
+    Cached on ``(base, component_name)`` so repeat calls return the *same* wrapped class object —
+    preserving this module's ``is``-identity contract (``test_accessor_calls_are_cached_too``).
+    Cleared alongside :func:`_build_serializer` by :func:`_clear_cache_on_model_swap`, since a
+    cached wrapper here holds the same kind of reference to a torn-down app registry's model class
+    that motivates that clear in the first place.
+    """
+    key = (base, component_name)
+    cached = _component_name_cache.get(key)
+    if cached is not None:
+        return cached
+    subclass = type(f"{component_name}Serializer", (base,), {})
+    extend_schema_serializer(component_name=component_name)(subclass)
+    wrapped = cast("type[serializers.ModelSerializer[Any]]", subclass)
+    _component_name_cache[key] = wrapped
+    return wrapped
 
 
 def _ordered_union(*sequences: Sequence[str]) -> tuple[str, ...]:
@@ -297,7 +346,7 @@ def get_user_read_serializer() -> type[serializers.ModelSerializer[Any]]:
     fields = tuple(conf.get_setting("USER_READ_FIELDS"))
     model = get_user_model()
     _validate_known_fields(model, fields, "USER_READ_FIELDS")
-    return build_serializer(model, fields, read_only_fields=fields)
+    return _with_component_name(build_serializer(model, fields, read_only_fields=fields), "MeUser")
 
 
 def get_user_editable_serializer() -> type[serializers.ModelSerializer[Any]]:
@@ -319,7 +368,9 @@ def get_user_public_serializer() -> type[serializers.ModelSerializer[Any]]:
     fields = tuple(conf.get_setting("USER_PUBLIC_FIELDS"))
     model = get_user_model()
     _validate_known_fields(model, fields, "USER_PUBLIC_FIELDS")
-    return build_serializer(model, fields, read_only_fields=fields)
+    return _with_component_name(
+        build_serializer(model, fields, read_only_fields=fields), "PublicUser"
+    )
 
 
 def get_profile_read_serializer() -> type[serializers.ModelSerializer[Any]]:
@@ -330,7 +381,9 @@ def get_profile_read_serializer() -> type[serializers.ModelSerializer[Any]]:
         conf.get_setting("PROFILE_EDITABLE_FIELDS"), conf.get_setting("PROFILE_READ_FIELDS")
     )
     _validate_known_fields(model, fields, "PROFILE_EDITABLE_FIELDS/PROFILE_READ_FIELDS")
-    return build_serializer(model, fields, read_only_fields=fields)
+    return _with_component_name(
+        build_serializer(model, fields, read_only_fields=fields), "MeProfile"
+    )
 
 
 def get_profile_edit_serializer() -> type[serializers.ModelSerializer[Any]]:
@@ -338,7 +391,7 @@ def get_profile_edit_serializer() -> type[serializers.ModelSerializer[Any]]:
     model = resolution.get_profile_model()
     fields = tuple(conf.get_setting("PROFILE_EDITABLE_FIELDS"))
     _validate_known_fields(model, fields, "PROFILE_EDITABLE_FIELDS")
-    return build_serializer(model, fields)
+    return _with_component_name(build_serializer(model, fields), "MeProfileUpdate")
 
 
 _public_profile_cache: dict[
@@ -369,7 +422,9 @@ def get_public_profile_serializer() -> type[serializers.ModelSerializer[Any]]:
         (base,),
         {"user": user_serializer(read_only=True)},
     )
-    serializer_cls = cast("type[serializers.ModelSerializer[Any]]", subclass)
+    serializer_cls = _with_component_name(
+        cast("type[serializers.ModelSerializer[Any]]", subclass), "PublicProfile"
+    )
     _public_profile_cache[key] = serializer_cls
     return serializer_cls
 
@@ -382,7 +437,9 @@ def get_setting_read_serializer() -> type[serializers.ModelSerializer[Any]]:
         conf.get_setting("SETTING_EDITABLE_FIELDS"), conf.get_setting("SETTING_READ_FIELDS")
     )
     _validate_known_fields(model, fields, "SETTING_EDITABLE_FIELDS/SETTING_READ_FIELDS")
-    return build_serializer(model, fields, read_only_fields=fields)
+    return _with_component_name(
+        build_serializer(model, fields, read_only_fields=fields), "MeSetting"
+    )
 
 
 def get_setting_edit_serializer() -> type[serializers.ModelSerializer[Any]]:
@@ -390,7 +447,7 @@ def get_setting_edit_serializer() -> type[serializers.ModelSerializer[Any]]:
     model = resolution.get_setting_model()
     fields = tuple(conf.get_setting("SETTING_EDITABLE_FIELDS"))
     _validate_known_fields(model, fields, "SETTING_EDITABLE_FIELDS")
-    return build_serializer(model, fields)
+    return _with_component_name(build_serializer(model, fields), "MeSettingUpdate")
 
 
 # --------------------------------------------------------------------------------------- admin
@@ -403,7 +460,7 @@ def get_admin_user_serializer() -> type[serializers.ModelSerializer[Any]]:
     read-only automatically, via ``ModelSerializer``'s own handling of ``Field.editable`` — no
     explicit ``read_only_fields`` needed here."""
     model = get_user_model()
-    return build_serializer(model, _full_field_names(model))
+    return _with_component_name(build_serializer(model, _full_field_names(model)), "AdminUser")
 
 
 def get_admin_profile_serializer() -> type[serializers.ModelSerializer[Any]]:
@@ -414,7 +471,10 @@ def get_admin_profile_serializer() -> type[serializers.ModelSerializer[Any]]:
     letting an admin ``PATCH`` re-point one user's Profile row onto another account. Still
     visible on ``GET``, never accepted on ``PATCH``."""
     model = resolution.get_profile_model()
-    return build_serializer(model, _full_field_names(model), read_only_fields=("user",))
+    return _with_component_name(
+        build_serializer(model, _full_field_names(model), read_only_fields=("user",)),
+        "AdminProfile",
+    )
 
 
 def get_admin_setting_serializer() -> type[serializers.ModelSerializer[Any]]:
@@ -422,7 +482,10 @@ def get_admin_setting_serializer() -> type[serializers.ModelSerializer[Any]]:
     full-fields build, not ``SETTING_EDITABLE_FIELDS``. ``user`` is read-only — see
     :func:`get_admin_profile_serializer`'s docstring for why."""
     model = resolution.get_setting_model()
-    return build_serializer(model, _full_field_names(model), read_only_fields=("user",))
+    return _with_component_name(
+        build_serializer(model, _full_field_names(model), read_only_fields=("user",)),
+        "AdminSetting",
+    )
 
 
 # ------------------------------------------------------------------------------ deletion request
