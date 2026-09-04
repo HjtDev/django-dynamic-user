@@ -505,8 +505,8 @@ already-`/users`-suffixed basePath; flagged in §10 item 7). All gated by the ad
 | `GET` | `/{id}/setting/` | — | `dynamic_user_admin_setting_update` | — | Every real field on the resolved Setting model |
 | `PATCH` | `/{id}/setting/` | — | `dynamic_user_admin_setting_update` | Any Setting field | Updated via `SettingService.update(target_user, ...)` |
 | `GET` | `/deletion-requests/` | — | `dynamic_user_admin_deletions_list` | query: `status` filter | Paginated `AccountDeletionRequest` list |
-| `POST` | `/deletion-requests/{id}/review/` | — | `dynamic_user_admin_deletion_review` | `{"approved": bool}` | `DeletionService.review(request_id, approved=..., reviewed_by=request.user)` |
-| `POST` | `/deletion-requests/{id}/finalize/` | **superuser-only, always** | `dynamic_user_admin_deletion_finalize` | — | `DeletionService.finalize(request_id)`, bypassing `finalize_at`. `403` for any non-superuser regardless of `ADMIN_REQUIRES_SUPERUSER` |
+| `POST` | `/deletion-requests/{id}/review/` | — | `dynamic_user_admin_deletion_review` | `{"approved": bool}` | `DeletionService.review(request_id, approved=..., reviewed_by=request.user)`. `200` with the full admin deletion-request shape (includes `user`/`reviewed_by`, unlike the self-service serializer); `409` if not currently `PENDING` |
+| `POST` | `/deletion-requests/{id}/finalize/` | **superuser-only, always** | `dynamic_user_admin_deletion_finalize` | — | `DeletionService.finalize(request_id)`, bypassing `finalize_at`. `204` on success (a `hard_delete` leaves no row to serialize); `403` for any non-superuser regardless of `ADMIN_REQUIRES_SUPERUSER`; `409` if not currently `APPROVED` |
 
 **The privilege-escalation gate, spelled out explicitly so it cannot be implemented as "any staff
 user can PATCH anything":**
@@ -857,6 +857,24 @@ Everything not listed here is unchanged from
     else happened to import that module first. `HistoryMixin.log_change()` (`mixins.py`) reaches
     it through a function-local import (`from dynamic_user.models import ChangeLogEntry`) — a
     placement change only; no field, name, or index differs from what §1 specifies.
+16. **The admin DRF API lives in `admin_views.py`, not `views_admin.py`.** Phase 1 stubbed both —
+    `views_admin.py` documented as the DRF admin API, `admin_views.py` documented as custom
+    Jazzmin HTML dashboard pages. `docs/APP-DESIGN.md` §5 ("Custom Admin Dashboard API —
+    `admin_views.py` + `urls_admin.py`"), `cleanup_app`'s own identically-shaped package, and this
+    app's own Phase 6 guide prompt ("the custom `admin_views.py` API") all name `admin_views.py`
+    as the DRF surface; this contract's own §5 specifies no custom Jazzmin HTML page at all.
+    `views_admin.py` was therefore deleted — nothing imported it — and the admin DRF surface
+    (`AdminUserListView`, `AdminUserDetailView`, `AdminUserProfileView`, `AdminUserSettingView`,
+    `AdminDeletionRequestListView`, `AdminDeletionRequestReviewView`,
+    `AdminDeletionRequestFinalizeView`) lives in `admin_views.py`, paired with `urls_admin.py` the
+    way `views.py` pairs with `urls.py`.
+17. **`get_admin_profile_serializer()`/`get_admin_setting_serializer()` mark `user` read-only.**
+    §5's "admin can read/write EVERY field" is read as every field a legitimate admin action
+    could plausibly touch — reassigning a Profile/Setting row's `user` O2O to a different account
+    is not that; it is a way to move one user's profile/setting data onto an account the caller
+    controls. `user` stays visible on `GET`, is excluded from `read_only_fields=()`'s empty
+    default and instead passed `("user",)` — still a full-fields `build_serializer()` call
+    through the Phase 4 factory, per §5's own requirement, just with one field pinned read-only.
 
 ---
 

@@ -408,16 +408,21 @@ def get_admin_user_serializer() -> type[serializers.ModelSerializer[Any]]:
 
 def get_admin_profile_serializer() -> type[serializers.ModelSerializer[Any]]:
     """Every real field on the resolved Profile model, minus :data:`DENIED_FIELDS` — the admin
-    full-fields build (``docs/CONTRACT.md`` §5), not ``PROFILE_EDITABLE_FIELDS``."""
+    full-fields build (``docs/CONTRACT.md`` §5), not ``PROFILE_EDITABLE_FIELDS``.
+
+    ``user`` is read-only here — full-fields would otherwise make the owning O2O writable,
+    letting an admin ``PATCH`` re-point one user's Profile row onto another account. Still
+    visible on ``GET``, never accepted on ``PATCH``."""
     model = resolution.get_profile_model()
-    return build_serializer(model, _full_field_names(model))
+    return build_serializer(model, _full_field_names(model), read_only_fields=("user",))
 
 
 def get_admin_setting_serializer() -> type[serializers.ModelSerializer[Any]]:
     """Every real field on the resolved Setting model, minus :data:`DENIED_FIELDS` — the admin
-    full-fields build, not ``SETTING_EDITABLE_FIELDS``."""
+    full-fields build, not ``SETTING_EDITABLE_FIELDS``. ``user`` is read-only — see
+    :func:`get_admin_profile_serializer`'s docstring for why."""
     model = resolution.get_setting_model()
-    return build_serializer(model, _full_field_names(model))
+    return build_serializer(model, _full_field_names(model), read_only_fields=("user",))
 
 
 # ------------------------------------------------------------------------------ deletion request
@@ -459,3 +464,59 @@ class DeletionRequestSerializer(serializers.ModelSerializer[AccountDeletionReque
             "finalize_at",
         ]
         read_only_fields = fields
+
+
+# ------------------------------------------------------------------------------------- admin API
+
+
+class AdminDeletionRequestSerializer(serializers.ModelSerializer[AccountDeletionRequest]):
+    """``GET /deletion-requests/``, and the response body of the review/finalize actions —
+    entirely read-only. Unlike the self-service :class:`DeletionRequestSerializer`, this one
+    includes ``user`` and ``reviewed_by`` — an admin reviewing a queue of everyone's requests
+    needs to know whose request it is and who already reviewed it; a self-service caller already
+    knows both (or, for ``reviewed_by``, was never meant to see it, per this package's own
+    rules)."""
+
+    class Meta:
+        model = AccountDeletionRequest
+        fields: ClassVar[list[str]] = [
+            "id",
+            "user",
+            "status",
+            "reason",
+            "requested_at",
+            "reviewed_at",
+            "reviewed_by",
+            "finalize_at",
+        ]
+        read_only_fields = fields
+
+
+class DeletionReviewSerializer(serializers.Serializer[Any]):
+    """``POST /deletion-requests/{id}/review/``'s request body — the only field a caller may
+    supply. Not a ``ModelSerializer``: ``approved`` isn't itself a model field, it's the input to
+    ``DeletionService.review()``'s ``approved`` kwarg."""
+
+    approved = serializers.BooleanField(required=True)
+
+
+class AdminDeletionRequestFilterSerializer(serializers.Serializer[Any]):
+    """Validates ``GET /deletion-requests/``'s query params before they ever reach a
+    ``.filter()`` call — fed to ``appkit.validation.validate_query_params``, per this package's
+    own "never raw ``**request.GET``" rule. An invalid ``status`` is a clean ``400`` through
+    appkit's envelope, not a query that silently returns an empty page."""
+
+    status = serializers.ChoiceField(choices=AccountDeletionRequest.Status.choices, required=False)
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1)
+
+
+class AdminUserFilterSerializer(serializers.Serializer[Any]):
+    """Validates ``GET /`` (the admin user list)'s pagination query params. The *filterable*
+    field names themselves come from the resolved user model at request time
+    (``admin_views._filterable_user_fields``), never a static list here — a host's subclassed
+    field must be filterable with zero package changes, which a serializer enumerating field
+    names statically could never provide."""
+
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1)

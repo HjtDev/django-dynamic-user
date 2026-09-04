@@ -3,9 +3,294 @@ info:
   title: django-dynamic-user
   version: 0.0.0
 paths:
+  /api/v1/admin/users/:
+    get:
+      operationId: admin_users_list
+      description: Paginated, filterable list of every user. USER_READ_FIELDS-shaped
+        full fields except password.
+      summary: List users (admin)
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUser3DA8C8List'
+          description: ''
+  /api/v1/admin/users/{id}/:
+    get:
+      operationId: admin_users_retrieve
+      description: Every real field except password.
+      summary: Retrieve a user (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User3DA8C8'
+          description: ''
+    patch:
+      operationId: admin_users_partial_update
+      description: Any user field except password. 403 (whole request rejected) if
+        a non-superuser's body touches is_staff/is_superuser/is_active/groups/user_permissions.
+      summary: Update a user (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUser3DA8C8Request'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUser3DA8C8Request'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUser3DA8C8Request'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User3DA8C8'
+          description: ''
+  /api/v1/admin/users/{id}/profile/:
+    get:
+      operationId: admin_users_profile_retrieve
+      description: Every real field on the resolved Profile model.
+      summary: Retrieve a user's profile (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileFDEB75'
+          description: ''
+    patch:
+      operationId: admin_users_profile_partial_update
+      description: Any Profile field, applied via ProfileService.update.
+      summary: Update a user's profile (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProfileFDEB75Request'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProfileFDEB75Request'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProfileFDEB75Request'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileFDEB75'
+          description: ''
+  /api/v1/admin/users/{id}/setting/:
+    get:
+      operationId: admin_users_setting_retrieve
+      description: Every real field on the resolved Setting model.
+      summary: Retrieve a user's setting (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingBD019E'
+          description: ''
+    patch:
+      operationId: admin_users_setting_partial_update
+      description: Any Setting field, applied via SettingService.update.
+      summary: Update a user's setting (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSettingBD019ERequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSettingBD019ERequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSettingBD019ERequest'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingBD019E'
+          description: ''
+  /api/v1/admin/users/deletion-requests/:
+    get:
+      operationId: admin_users_deletion_requests_list
+      description: Paginated, filterable by status.
+      summary: List account-deletion requests (admin)
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminDeletionRequestList'
+          description: ''
+  /api/v1/admin/users/deletion-requests/{id}/finalize/:
+    post:
+      operationId: admin_users_deletion_requests_finalize_create
+      description: Bypasses finalize_at. Irreversible. 409 if the request isn't currently
+        APPROVED.
+      summary: Finalize an account-deletion request early (admin, superuser-only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/admin/users/deletion-requests/{id}/review/:
+    post:
+      operationId: admin_users_deletion_requests_review_create
+      description: Moves a PENDING request to APPROVED or REJECTED. 409 if not PENDING.
+      summary: Review an account-deletion request (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeletionReviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeletionReviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeletionReviewRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDeletionRequest'
+          description: ''
   /api/v1/users/me/:
     get:
-      operationId: me_retrieve
+      operationId: users_me_retrieve
       description: USER_READ_FIELDS, entirely read-only — includes locked fields for
         visibility, none of them writable from here or anywhere else on this surface.
       summary: Get my account info
@@ -23,7 +308,7 @@ paths:
           description: ''
   /api/v1/users/me/deletion-request/:
     get:
-      operationId: me_deletion_request_retrieve
+      operationId: users_me_deletion_request_retrieve
       description: The caller's active (pending or approved) request, or 404 if none
         exists.
       summary: Get my current deletion request
@@ -40,7 +325,7 @@ paths:
                 $ref: '#/components/schemas/DeletionRequest'
           description: ''
     post:
-      operationId: me_deletion_request_create
+      operationId: users_me_deletion_request_create
       description: Starts the grace-period countdown. 409 (not 500) if a request is
         already pending or approved, rather than creating a duplicate.
       summary: Request account deletion
@@ -68,7 +353,7 @@ paths:
                 $ref: '#/components/schemas/DeletionRequest'
           description: ''
     delete:
-      operationId: me_deletion_request_destroy
+      operationId: users_me_deletion_request_destroy
       description: 409 (not 500) if the caller's request isn't currently pending.
       summary: Cancel my deletion request
       tags:
@@ -81,7 +366,7 @@ paths:
           description: No response body
   /api/v1/users/me/profile/:
     get:
-      operationId: me_profile_retrieve
+      operationId: users_me_profile_retrieve
       description: PROFILE_EDITABLE_FIELDS + PROFILE_READ_FIELDS (union).
       summary: Get my profile
       tags:
@@ -97,7 +382,7 @@ paths:
                 $ref: '#/components/schemas/ProfileE086A0'
           description: ''
     patch:
-      operationId: me_profile_partial_update
+      operationId: users_me_profile_partial_update
       description: PROFILE_EDITABLE_FIELDS, applied via ProfileService.update.
       summary: Update my profile
       tags:
@@ -125,7 +410,7 @@ paths:
           description: ''
   /api/v1/users/me/setting/:
     get:
-      operationId: me_setting_retrieve
+      operationId: users_me_setting_retrieve
       description: SETTING_EDITABLE_FIELDS + SETTING_READ_FIELDS (union).
       summary: Get my setting
       tags:
@@ -141,7 +426,7 @@ paths:
                 $ref: '#/components/schemas/SettingF129A3'
           description: ''
     patch:
-      operationId: me_setting_partial_update
+      operationId: users_me_setting_partial_update
       description: SETTING_EDITABLE_FIELDS, applied via SettingService.update.
       summary: Update my setting
       tags:
@@ -169,7 +454,7 @@ paths:
           description: ''
   /api/v1/users/profiles/:
     get:
-      operationId: profiles_list
+      operationId: users_profiles_list
       description: Paginated, cached list of every profile with is_public=True. PROFILE_PUBLIC_FIELDS
         plus a nested user block from USER_PUBLIC_FIELDS.
       summary: List public profiles
@@ -200,7 +485,7 @@ paths:
           description: ''
   /api/v1/users/profiles/{id}/:
     get:
-      operationId: profiles_retrieve
+      operationId: users_profiles_retrieve
       description: PROFILE_PUBLIC_FIELDS plus a nested user block from USER_PUBLIC_FIELDS,
         for one profile. {id} is the target user's id, not the Profile row's own pk.
         404 (not 403) when the profile is private and the requester isn't the owner.
@@ -225,6 +510,56 @@ paths:
           description: ''
 components:
   schemas:
+    AdminDeletionRequest:
+      type: object
+      description: |-
+        ``GET /deletion-requests/``, and the response body of the review/finalize actions —
+        entirely read-only. Unlike the self-service :class:`DeletionRequestSerializer`, this one
+        includes ``user`` and ``reviewed_by`` — an admin reviewing a queue of everyone's requests
+        needs to know whose request it is and who already reviewed it; a self-service caller already
+        knows both (or, for ``reviewed_by``, was never meant to see it, per this package's own
+        rules).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusEnum'
+          readOnly: true
+        reason:
+          type: string
+          readOnly: true
+        requested_at:
+          type: string
+          format: date-time
+          readOnly: true
+        reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        reviewed_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        finalize_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - finalize_at
+      - id
+      - reason
+      - requested_at
+      - reviewed_at
+      - reviewed_by
+      - status
+      - user
     DeletionRequest:
       type: object
       description: |-
@@ -277,6 +612,40 @@ components:
       properties:
         reason:
           type: string
+    DeletionReviewRequest:
+      type: object
+      description: |-
+        ``POST /deletion-requests/{id}/review/``'s request body — the only field a caller may
+        supply. Not a ``ModelSerializer``: ``approved`` isn't itself a model field, it's the input to
+        ``DeletionService.review()``'s ``approved`` kwarg.
+      properties:
+        approved:
+          type: boolean
+      required:
+      - approved
+    PaginatedAdminDeletionRequestList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminDeletionRequest'
     PaginatedProfile5CEF83SerializerWithUserList:
       type: object
       required:
@@ -300,7 +669,37 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Profile5CEF83SerializerWithUser'
+    PaginatedUser3DA8C8List:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/User3DA8C8'
     PatchedProfile7940FBRequest:
+      type: object
+      properties:
+        bio:
+          type: string
+        is_public:
+          type: boolean
+    PatchedProfileFDEB75Request:
       type: object
       properties:
         bio:
@@ -320,6 +719,62 @@ components:
           maxLength: 64
         notifications_enabled:
           type: boolean
+    PatchedSettingBD019ERequest:
+      type: object
+      properties:
+        language:
+          type: string
+          minLength: 1
+          maxLength: 10
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+        notifications_enabled:
+          type: boolean
+    PatchedUser3DA8C8Request:
+      type: object
+      properties:
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+        is_superuser:
+          type: boolean
+          title: Superuser status
+          description: Designates that this user has all permissions without explicitly
+            assigning them.
+        username:
+          type: string
+          minLength: 1
+          maxLength: 150
+        name:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+        phone:
+          type: string
+          nullable: true
+          maxLength: 32
+        is_active:
+          type: boolean
+        is_staff:
+          type: boolean
+        groups:
+          type: array
+          items:
+            type: integer
+          description: The groups this user belongs to. A user will get all permissions
+            granted to each of their groups.
+        user_permissions:
+          type: array
+          items:
+            type: integer
+          description: Specific permissions for this user.
     Profile5CEF83SerializerWithUser:
       type: object
       properties:
@@ -353,6 +808,42 @@ components:
       - bio
       - id
       - is_public
+    ProfileFDEB75:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        bio:
+          type: string
+        is_public:
+          type: boolean
+      required:
+      - id
+      - user
+    SettingBD019E:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        language:
+          type: string
+          maxLength: 10
+        timezone:
+          type: string
+          maxLength: 64
+        notifications_enabled:
+          type: boolean
+      required:
+      - id
+      - user
     SettingF129A3:
       type: object
       properties:
@@ -385,6 +876,59 @@ components:
         * `approved` - Approved
         * `rejected` - Rejected
         * `finalized` - Finalized
+    User3DA8C8:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+        is_superuser:
+          type: boolean
+          title: Superuser status
+          description: Designates that this user has all permissions without explicitly
+            assigning them.
+        username:
+          type: string
+          maxLength: 150
+        name:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        phone:
+          type: string
+          nullable: true
+          maxLength: 32
+        is_active:
+          type: boolean
+        is_staff:
+          type: boolean
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        groups:
+          type: array
+          items:
+            type: integer
+          description: The groups this user belongs to. A user will get all permissions
+            granted to each of their groups.
+        user_permissions:
+          type: array
+          items:
+            type: integer
+          description: Specific permissions for this user.
+      required:
+      - date_joined
+      - email
+      - id
+      - username
     User6768FE:
       type: object
       properties:
