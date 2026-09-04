@@ -1,0 +1,135 @@
+# Phase 8 playground — docs/APP-DESIGN.md §11.2 / docs/CLAUDE-CODE-GUIDE-APP-DYNAMIC-USER.md
+# Phase 8. TWO Django+Next hosts, not one — this app's entire design exists to prove a host can
+# install its default concrete models OR subclass all three with zero package-level code changes,
+# and that can only be shown by two hosts running side by side, not one host toggled between
+# settings.
+#
+# ONE compose file, not two (the Phase 8 brief leaves this choice open) — a shared Postgres
+# (two separate databases, never one shared database: `swappable` skips
+# dynamic_user_user/_profile/_setting entirely on the swapped leg, so the two hosts' migrations
+# produce genuinely different table sets) and a shared Redis, so a single `docker compose up`
+# brings up both hosts for a side-by-side comparison (same request, :8000 vs :8001) without two
+# separate `up` invocations or two sets of infra containers to keep in sync.
+#
+# Ports deliberately avoid every port already claimed by a sibling repo's own docker-compose:
+# 55432 (appkit, base-scaffold), 55433 (cleanup_app), 55434 (this repo's own docker-compose.test.yml),
+# 55435/63793 (cleanup_app's playground) — so every one of these can run at once on one machine.
+#
+# Run from the REPO ROOT, not from playground/ — the build context is `..` from here (repo root)
+# so each Dockerfile can COPY both this app's own working tree (backend/, frontend/) and its own
+# playground consumer at once, preserving on-disk relative layout so `[tool.uv.sources]`'s
+# `path = "../../../backend"` resolves identically in and out of Docker:
+#   docker compose -f playground/docker-compose.yml up -d --wait
+# or: make playground-up
+
+name: dynamic-user-playground
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: playground_default
+      POSTGRES_USER: playground
+      POSTGRES_PASSWORD: playground
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U playground -d playground_default"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports: ["55436:5432"]
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports: ["63794:6379"]
+
+  # ---- default host — dynamic_user's own concrete User/Profile/Setting, used as-is -----------
+  backend-default:
+    build:
+      context: ..
+      dockerfile: playground/default/backend/Dockerfile
+    environment: &backend_default_env
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: playground_default
+      POSTGRES_USER: playground
+      POSTGRES_PASSWORD: playground
+      REDIS_URL: redis://redis:6379/0
+      DEBUG: "false"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,backend-default"
+      CSRF_TRUSTED_ORIGINS: "http://localhost:3000"
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ports: ["8000:8000"]
+
+  # Runs both a worker and a beat scheduler — the celery[[extra]] path is exercised only on the
+  # default host; the subclassed host proves the OTHER finalize path (the plain management
+  # command, no Celery installed at all) instead, per Phase 8's "via the task/command, not just
+  # the forced admin endpoint" requirement covering both routes across the two hosts.
+  worker-default:
+    build:
+      context: ..
+      dockerfile: playground/default/backend/Dockerfile
+    command: celery -A config worker --beat --loglevel=info
+    environment: *backend_default_env
+    depends_on:
+      backend-default: { condition: service_healthy }
+
+  frontend-default:
+    build:
+      context: ..
+      dockerfile: playground/default/frontend/Dockerfile
+    environment:
+      BACKEND_URL: http://backend-default:8000
+    ports: ["3000:3000"]
+    depends_on:
+      backend-default: { condition: service_healthy }
+
+  # ---- subclassed host — a host `core` app subclassing all three models ----------------------
+  backend-subclassed:
+    build:
+      context: ..
+      dockerfile: playground/subclassed/backend/Dockerfile
+    environment: &backend_subclassed_env
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: playground_subclassed
+      POSTGRES_USER: playground
+      POSTGRES_PASSWORD: playground
+      REDIS_URL: redis://redis:6379/1
+      DEBUG: "false"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,backend-subclassed"
+      CSRF_TRUSTED_ORIGINS: "http://localhost:3001"
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ports: ["8001:8000"]
+
+  frontend-subclassed:
+    build:
+      context: ..
+      dockerfile: playground/subclassed/frontend/Dockerfile
+    environment:
+      BACKEND_URL: http://backend-subclassed:8000
+    ports: ["3001:3000"]
+    depends_on:
+      backend-subclassed: { condition: service_healthy }

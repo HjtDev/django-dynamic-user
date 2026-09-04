@@ -1,0 +1,33 @@
+[project]
+name = "playground-subclassed"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "django-dynamic-user",
+    "django>=5.2,<7.0",
+    "djangorestframework>=3.15,<4.0",
+    "drf-spectacular>=0.27,<1.0",
+    "django-jazzmin>=3.0",
+    "uvicorn>=0.34",
+    "psycopg[binary]>=3.2.10",
+    "django-redis>=5.4",
+    "python-decouple>=3.8",
+]
+
+[dependency-groups]
+test = ["pytest>=8.3", "pytest-django>=4.9", "httpx>=0.27"]
+
+[tool.uv]
+default-groups = ["test"]
+
+# Path-linked, not tag-pinned — same reasoning as playground/default/backend/pyproject.toml.
+[tool.uv.sources]
+django-dynamic-user = { path = "../../../backend", editable = true }
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+markers = [
+    "live: hits the real docker-compose stack over HTTP, not Django's test client",
+]
