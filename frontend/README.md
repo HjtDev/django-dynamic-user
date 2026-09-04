@@ -45,6 +45,10 @@ schedule" and the `AvatarMixin` row of the mixins table below.
 
 ## The two swappable-model settings
 
+(Plus `AUTH_USER_MODEL` itself, Django's own top-level setting, reused rather than duplicated —
+see the table below. "Two" counts the settings this package defines; three settings total govern
+which concrete models are active.)
+
 This app ships three swappable models, resolved the same way `django.contrib.auth.get_user_model()`
 resolves `AUTH_USER_MODEL`:
 
@@ -74,8 +78,9 @@ allowlists need to name the new field.
 
 ```python
 # core/models.py
-from django.db import models
+from typing import ClassVar
 
+from django.db import models
 from dynamic_user.managers import UserManager
 from dynamic_user.models import AbstractDynamicUser, AbstractProfile, AbstractSetting
 
@@ -86,7 +91,12 @@ class User(AbstractDynamicUser):
     # Required — AbstractDynamicUser doesn't declare `objects` as inheritable in a way Django's
     # migration state picks up automatically; every host subclass must re-declare it. Easy to
     # omit; `createsuperuser`/`create_user` breaks with a cryptic error without it.
-    objects = UserManager()
+    #
+    # The `ClassVar` annotation matters if mypy + django-stubs are configured (base-scaffold's
+    # own baseline is): a bare `objects = UserManager()` fails with "Cannot override class
+    # variable ... with instance variable" against the identical bare assignment on
+    # AbstractDynamicUser itself.
+    objects: ClassVar[UserManager] = UserManager()
 
 
 class Profile(AbstractProfile):
@@ -108,6 +118,16 @@ attribute of its own, exactly like any other project's custom `AUTH_USER_MODEL`.
 INSTALLED_APPS += ["core"]  # must be installed BEFORE "dynamic_user" is added, or Django's
                              # swappable-model resolution can't find it at migration time
 
+# Still required even though every model below is subclassed — "dynamic_user" itself must stay
+# in INSTALLED_APPS. core/models.py's own `from dynamic_user.models import AbstractDynamicUser,
+# ...` also imports that module's unconditionally-defined CONCRETE User/Profile/Setting classes
+# (the ones a default host uses as-is); Django's model metaclass requires their app to be
+# installed to resolve an app_label, even though a subclassed host never uses them as the active
+# models. Omitting this line crashes at the first `manage.py check` with: "Model class
+# dynamic_user.models.User doesn't declare an explicit app_label and isn't in an application in
+# INSTALLED_APPS."
+INSTALLED_APPS += ["dynamic_user"]
+
 AUTH_USER_MODEL = "core.User"
 DYNAMIC_USER_PROFILE_MODEL = "core.Profile"
 DYNAMIC_USER_SETTING_MODEL = "core.Setting"
@@ -128,6 +148,16 @@ A name in any `*_FIELDS` allowlist that doesn't exist on the *resolved* model is
 Copy this block verbatim. It is lifted directly from this package's own default-host playground
 (`playground/default/backend/config/settings.py`), which boots on it unmodified — the same block
 CI's `readme-contract` job (from v1.0.0 onward) will diff the code's real throttle scopes against.
+
+**Placement matters.** This block does `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(...)`, so
+it must go **after** `REST_FRAMEWORK` is defined in `settings.py` — not at the
+`# ---- installed app packages get added here` marker comment inside `INSTALLED_APPS`/
+`MIDDLEWARE`, which comes first in a base-scaffold host and will `NameError` if pasted there.
+Also confirm `REST_FRAMEWORK` carries a `dict[str, Any]` annotation (base-scaffold's own
+`APPKIT` dict does; `REST_FRAMEWORK` may not) — an unannotated dict literal with mixed value
+types makes `DEFAULT_THROTTLE_RATES`' inferred type too narrow for `.update()` under mypy +
+django-stubs. And run `ruff format` after pasting — this exact block is not `ruff format`-clean
+as shown (the `.update({...})` call needs its dict argument un-hugged).
 
 ```python
 # ============================================================================================
@@ -210,6 +240,7 @@ is a named startup error, never a mid-request crash and never a silent drop:
 | `dynamic_user.E001` | `DYNAMIC_USER_PROFILE_MODEL`/`DYNAMIC_USER_SETTING_MODEL` not shaped `"app_label.ModelName"` |
 | `dynamic_user.E002` | One of those settings names a model that isn't installed |
 | `dynamic_user.E003` | `DELETION_MODE` is neither `"hard_delete"` nor `"anonymize"`, or it's `"anonymize"` with no `DELETION_ANONYMIZE_FUNCTION` set |
+| `dynamic_user.E004` | The resolved `AUTH_USER_MODEL`/`DYNAMIC_USER_PROFILE_MODEL`/`DYNAMIC_USER_SETTING_MODEL` does not subclass this app's corresponding abstract base |
 | `dynamic_user.E005` | A name in any `*_FIELDS` allowlist (including `USER_PRIVILEGED_FIELDS`) that doesn't exist on the resolved model |
 
 ## Required `.env` keys
@@ -223,6 +254,8 @@ Two separate URLconfs, two separate namespaces — self-service and admin are ne
 together under one path:
 
 ```python
+from django.urls import include, path  # `include` — easy to miss if urls.py only imported `path`
+
 urlpatterns = [
     ...
     path("api/v1/users/", include("dynamic_user.urls")),
@@ -243,6 +276,22 @@ If you subclassed any of the three models, run your own app's `makemigrations`/`
 app instead — `dynamic_user`'s own migrations only apply when its concrete `User`/`Profile`/
 `Setting` are actually in use. `ChangeLogEntry` (the model behind `HistoryMixin`) is not
 swappable and always migrates with `dynamic_user` regardless.
+
+## Verifying the install
+
+```bash
+uv run python manage.py createsuperuser
+uv run python manage.py runserver   # or docker compose up --build
+curl -u <username>:<password> http://localhost:8000/api/v1/users/me/            # 200
+curl -u <username>:<password> http://localhost:8000/api/v1/admin/users/         # 200 (superuser)
+```
+
+Also check `/api/schema/swagger-ui/` for a `dynamic-user` and a `dynamic-user-admin` tag group,
+and `/admin/` for the model entries under the sidebar (see "Suggested Jazzmin icons" below — no
+further `JAZZMIN_SETTINGS` edits needed beyond the `icons` block). DRF's own default
+`DEFAULT_AUTHENTICATION_CLASSES` (session + HTTP Basic) is enough to exercise the endpoints above
+without installing anything else — a real host still wants its own `auth-app` or session-cookie
+strategy for a browser-based login flow, which this package deliberately doesn't provide.
 
 ## Endpoints
 
@@ -364,11 +413,12 @@ want that one scheduled without Celery.
 
 ```
 dynamic_user.tasks.finalize_due_deletions  — daily at 03:00
-dynamic_user.tasks.purge_deletion_history  — weekly
+dynamic_user.tasks.purge_deletion_history  — weekly (day/hour genuinely host-specific — pick one)
 ```
 
 This is a recommendation, not something that auto-registers — the host creates the actual
-`django_celery_beat` schedule entry.
+`django_celery_beat` schedule entry, preferably as a data migration in `core/` (see
+`INTEGRATION-GUIDE.md` §2 step 9) so it's reproducible and reviewable.
 
 ## Suggested Jazzmin icons
 
@@ -404,16 +454,21 @@ Peer dependencies: `react>=18`, `@tanstack/react-query>=5`, `@hjtdev/appkit>=2.0
 ## Usage — two `basePaths` entries, then import hooks from the package root
 
 **This app registers two API surfaces, not one** — `dynamic_user` (self-service) and
-`dynamic_user_admin` (admin). A host wiring only `dynamic_user` will see every admin hook 404 or
-hit the self-service prefix instead; both entries are required on `@hjtdev/appkit`'s
-`ApiClientProvider`, the one provider a host mounts for its whole app:
+`dynamic_user_admin` (admin). Register both entries explicitly on `@hjtdev/appkit`'s
+`ApiClientProvider`, the one provider a host mounts for its whole app. In practice, omitting
+`dynamic_user_admin` is often *not* immediately visible: `useApiClient(key, defaultBasePath)`
+falls back to this app's own documented default (`/api/v1/admin/users`) when the key is missing,
+which is exactly this app's own recommended mount path — so a host that mounted the backend URLs
+as shown below sees the admin hooks keep working. The real risk is silent, not immediate: a host
+that later remounts the backend at a different prefix, while still relying on the unregistered
+default, gets a failure with no signal at the point the mistake was made. Register both keys
+explicitly regardless — it's the only config the fallback can't paper over later.
 
 ```tsx
 // app/providers.tsx — one-time wiring per host
 import { useState } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { ApiClientProvider } from "@hjtdev/appkit";
-import { makeQueryClient } from "@/lib/query-client";
+import { ApiClientProvider, makeQueryClient } from "@hjtdev/appkit";
 import { apiClient } from "@/lib/api-client";
 
 export function Providers({ children }: { children: React.ReactNode }) {

@@ -12,6 +12,47 @@ that entry gets built from, not a substitute for it.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-05
+
+Phase 11 (`docs/PHASE-11-FINDINGS.md`): installed v1.0.0 into two fresh `base-scaffold` clones
+(one default models, one fully subclassed), following `INTEGRATION-GUIDE.md` §2 using only
+`README.md`. Documentation-only release — no backend or frontend source changed, no behavior
+changed, no `Host action` required.
+
+### Fixed
+
+- **README — subclassing example**: added the missing `INSTALLED_APPS += ["dynamic_user"]` line.
+  Following the example as previously written crashed at startup
+  (`RuntimeError: Model class dynamic_user.models.User doesn't declare an explicit app_label...`)
+  because `core/models.py`'s required import of the abstract bases also imports this package's
+  own unconditionally-defined concrete `User`/`Profile`/`Setting` classes, which still need their
+  app installed to resolve an `app_label` even when unused.
+- **README — settings block**: documented that the "copy this block verbatim" block must be
+  placed *after* `REST_FRAMEWORK` is defined in `settings.py` (it does
+  `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(...)`) — pasting it at the file's only marked
+  insertion point (inside/after `INSTALLED_APPS`/`MIDDLEWARE`) raised `NameError`. Also noted the
+  block needs `REST_FRAMEWORK: dict[str, Any]` to satisfy mypy, and a `ruff format` pass to
+  satisfy the formatter, as pasted.
+- **README — URL mounting**: the `urls.py` snippet was missing `from django.urls import include`.
+- **README — subclassing example**: `objects = UserManager()` now shown as
+  `objects: ClassVar[UserManager] = UserManager()` — the bare form fails mypy under django-stubs
+  ("Cannot override class variable ... with instance variable").
+- **README — basePaths warning corrected, not just softened**: the documented failure mode ("a
+  host wiring only `dynamic_user` will see every admin hook 404") does not occur for a host that
+  mounted the backend at this README's own recommended paths — confirmed live, twice, against the
+  real shipped SDK: `appkit`'s `useApiClient` fallback default equals the correct URL, so omitting
+  the `dynamic_user_admin` `basePaths` key produces byte-identical results to registering it. The
+  README now describes the real risk (a *future* backend remount silently falling back) instead
+  of a failure that doesn't reproduce under its own instructions.
+- **README — frontend usage example**: `makeQueryClient` was shown imported from a
+  `@/lib/query-client` module that doesn't exist in `base-scaffold`; corrected to import from
+  `@hjtdev/appkit`, matching a real host's own `app/providers.tsx`.
+- **README — system checks table**: added the missing `dynamic_user.E004` row (resolved model
+  doesn't subclass this app's abstract base).
+- **README**: added a "Verifying the install" section (none existed); noted that the weekly
+  `purge_deletion_history` schedule needs a host-chosen day/hour, and clarified the "two
+  swappable-model settings" heading against the three-row table beneath it.
+
 ## [1.0.0] - 2026-09-05
 
 First tagged release. Everything below shipped across Phases 0–9; there is no prior release to
