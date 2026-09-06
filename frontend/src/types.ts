@@ -15,6 +15,10 @@ import type { components, operations } from "./schema.js";
 /** `GET /me/` — USER_READ_FIELDS-shaped, entirely read-only. */
 export type User = components["schemas"]["MeUser"];
 
+/** `PATCH /me/`'s request body — v1.1.0. USER_SELF_EDITABLE_FIELDS minus USER_LOCKED_FIELDS,
+ * default just `name`. */
+export type UpdateMeInput = components["schemas"]["PatchedMeUserUpdateRequest"];
+
 /** `GET /me/profile/` — the union of PROFILE_EDITABLE_FIELDS and PROFILE_READ_FIELDS. */
 export type MyProfile = components["schemas"]["MeProfile"];
 
@@ -102,6 +106,97 @@ export type ReviewDeletionInput = components["schemas"]["DeletionReviewRequest"]
 
 /** `AccountDeletionRequest.status` — one of `StatusEnum`'s four values. */
 export type DeletionStatus = components["schemas"]["StatusEnum"];
+
+// --- v1.1.0: admin parity additions ---------------------------------------------------------
+
+/** `POST /`'s request body — any user field, plus an optional write-only `password`
+ * (unset -> `set_unusable_password()`). Privileged keys are accepted here but rejected
+ * server-side by `CanEscalatePrivilege` unless the caller is an actual superuser, same as
+ * {@link UpdateAdminUserInput}. */
+export type CreateAdminUserInput = components["schemas"]["AdminUserCreateRequest"];
+
+/** `POST /{id}/set-password/`'s request body. Superuser-only, always, server-side. */
+export type SetAdminUserPasswordInput = components["schemas"]["AdminSetPasswordRequest"];
+
+/** `GET /profiles/` (admin collection) response. */
+export type PaginatedAdminProfileList = components["schemas"]["PaginatedAdminProfileList"];
+
+/** `GET /profiles/` (admin collection)'s query params — `page`/`page_size` plus whatever
+ * exact-match field filters the *resolved* Profile model exposes
+ * (`_filterable_model_fields()`, backend/src/dynamic_user/admin_views.py) — same open-ended
+ * shape as {@link AdminUsersParams}, for the same reason. */
+export type AdminProfilesParams = NonNullable<
+  operations["admin_users_profiles_list"]["parameters"]["query"]
+> &
+  Record<string, string | number | boolean | undefined>;
+
+/** `POST /profiles/`'s request body — any Profile field, including `user` (writable here only —
+ * naming which user this new row belongs to is the entire point of a create call). */
+export type CreateAdminProfileInput = components["schemas"]["AdminProfileCreateRequest"];
+
+/** `GET /settings/` (admin collection) response. */
+export type PaginatedAdminSettingList = components["schemas"]["PaginatedAdminSettingList"];
+
+/** `GET /settings/` (admin collection)'s query params — same shape as
+ * {@link AdminProfilesParams}, for Setting. */
+export type AdminSettingsParams = NonNullable<
+  operations["admin_users_settings_list"]["parameters"]["query"]
+> &
+  Record<string, string | number | boolean | undefined>;
+
+/** `POST /settings/`'s request body — any Setting field, including `user`. */
+export type CreateAdminSettingInput = components["schemas"]["AdminSettingCreateRequest"];
+
+/** `ChangeLogEntry` (this app's own audit-log model) — entirely read-only. */
+export type AdminChangeLogEntry = components["schemas"]["AdminChangeLogEntry"];
+
+/** `GET /change-log/` response. */
+export type PaginatedAdminChangeLogEntryList =
+  components["schemas"]["PaginatedAdminChangeLogEntryList"];
+
+/** `GET /change-log/`'s query params — `page`/`page_size` plus `content_type`/`object_id`/
+ * `actor`/`field_name`, validated by `safe_filter_kwargs`'s own allowlist server-side
+ * (not schema-declared — same open-ended shape as {@link AdminProfilesParams}). */
+export type AdminChangeLogParams = NonNullable<
+  operations["admin_users_change_log_list"]["parameters"]["query"]
+> &
+  Record<string, string | number | boolean | undefined>;
+
+/** Django's own `django.contrib.admin.models.LogEntry` — entirely read-only. Only meaningful
+ * (and only ever populated with hooks/routes) when `django.contrib.admin` is installed on the
+ * backend. */
+export type AdminLogEntry = components["schemas"]["AdminLogEntry"];
+
+/** `GET /log-entries/` response. */
+export type PaginatedAdminLogEntryList = components["schemas"]["PaginatedAdminLogEntryList"];
+
+/** `GET /log-entries/`'s query params — `page`/`page_size` plus `action_flag`/`user`/
+ * `content_type`, same open-ended shape as {@link AdminChangeLogParams}. */
+export type AdminLogEntriesParams = NonNullable<
+  operations["admin_users_log_entries_list"]["parameters"]["query"]
+> &
+  Record<string, string | number | boolean | undefined>;
+
+/** `django.contrib.auth.models.Group` — read-only, populates the picker behind
+ * {@link UpdateAdminUserInput}'s `groups` field. */
+export type AdminGroup = components["schemas"]["AdminGroup"];
+
+/** `GET /groups/` response. */
+export type PaginatedAdminGroupList = components["schemas"]["PaginatedAdminGroupList"];
+
+/** `django.contrib.auth.models.Permission` — read-only, populates the picker behind
+ * {@link UpdateAdminUserInput}'s `user_permissions` field. */
+export type AdminPermission = components["schemas"]["AdminPermission"];
+
+/** `GET /permissions/` response. */
+export type PaginatedAdminPermissionList = components["schemas"]["PaginatedAdminPermissionList"];
+
+/** `POST /deletion-requests/`'s request body — `{user, reason}`. An admin filing a deletion
+ * request on a user's behalf; unlike hand-creating one through Django Admin's own change form,
+ * respects the same duplicate guard, `finalize_at` computation, and `deletion_requested` signal
+ * every other creation path gets. */
+export type CreateAdminDeletionRequestInput =
+  components["schemas"]["AdminDeletionRequestCreateRequest"];
 
 // appkit owns the HttpClient interface; re-exported for convenience, never redeclared.
 export type { HttpClient } from "@hjtdev/appkit";

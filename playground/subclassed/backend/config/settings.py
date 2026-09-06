@@ -170,6 +170,7 @@ MIDDLEWARE += []  # none required
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({
     "dynamic_user_me": "60/min",
+    "dynamic_user_me_update": "20/min",
     "dynamic_user_profile_update": "20/min",
     "dynamic_user_setting_update": "20/min",
     "dynamic_user_profiles_list": "60/min",
@@ -178,11 +179,30 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({
     "dynamic_user_admin_users_list": "60/min",
     "dynamic_user_admin_user_retrieve": "60/min",
     "dynamic_user_admin_user_update": "30/min",
+    "dynamic_user_admin_user_create": "20/min",
+    "dynamic_user_admin_user_delete": "10/min",
+    "dynamic_user_admin_user_set_password": "10/min",
     "dynamic_user_admin_profile_update": "30/min",
     "dynamic_user_admin_setting_update": "30/min",
     "dynamic_user_admin_deletions_list": "60/min",
     "dynamic_user_admin_deletion_review": "20/min",
     "dynamic_user_admin_deletion_finalize": "10/min",
+    "dynamic_user_admin_profiles_list": "60/min",
+    "dynamic_user_admin_profile_create": "20/min",
+    "dynamic_user_admin_profile_detail": "60/min",
+    "dynamic_user_admin_settings_list": "60/min",
+    "dynamic_user_admin_setting_create": "20/min",
+    "dynamic_user_admin_setting_detail": "60/min",
+    "dynamic_user_admin_deletion_request_detail": "60/min",
+    "dynamic_user_admin_deletion_request_create": "20/min",
+    "dynamic_user_admin_deletion_request_cancel": "20/min",
+    "dynamic_user_admin_change_log_list": "60/min",
+    "dynamic_user_admin_change_log_detail": "60/min",
+    "dynamic_user_admin_log_entries_list": "60/min",
+    "dynamic_user_admin_log_entry_detail": "60/min",
+    "dynamic_user_admin_groups_list": "60/min",
+    "dynamic_user_admin_group_detail": "60/min",
+    "dynamic_user_admin_permissions_list": "60/min",
 })
 
 # The three top-level swappable settings point at `core`'s own subclasses — see core/models.py.

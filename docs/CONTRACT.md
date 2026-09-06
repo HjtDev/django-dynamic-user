@@ -71,12 +71,14 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 
 from .managers import UserManager
+from .usernames import generate_username
+from . import conf, validators
 
 
 class AbstractDynamicUser(AbstractBaseUser, PermissionsMixin):
-    username = models.CharField(max_length=150, unique=True)
+    username = models.CharField(max_length=150, unique=True, blank=True)
     name = models.CharField(max_length=150, blank=True)
-    email = models.EmailField(unique=True)
+    email = models.EmailField(unique=True, null=True, blank=True)
     phone = models.CharField(max_length=32, unique=True, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -91,7 +93,7 @@ class AbstractDynamicUser(AbstractBaseUser, PermissionsMixin):
     # request time — changing them is a schema-affecting decision a host makes once, before its
     # first `migrate`, never a DYNAMIC_USER setting.
     USERNAME_FIELD = "username"
-    REQUIRED_FIELDS = ["email"]
+    REQUIRED_FIELDS: list[str] = []  # v1.1.0: was ["email"] — see below
 
     class Meta:
         abstract = True
@@ -99,6 +101,17 @@ class AbstractDynamicUser(AbstractBaseUser, PermissionsMixin):
             models.Index(fields=["email"]),
             models.Index(fields=["phone"]),
         ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(email__isnull=False) | models.Q(phone__isnull=False),
+                name="%(app_label)s_%(class)s_email_or_phone",
+            ),
+        ]
+
+    def save(self, **kwargs):
+        # Normalizes ""->None on email/phone, fills a missing username (usernames.py), enforces
+        # the email-or-phone rule, then super().save(). See prose below.
+        ...
 
 
 class User(AbstractDynamicUser):
@@ -107,13 +120,43 @@ class User(AbstractDynamicUser):
 ```
 
 **Addition to flag (§10 item 3):** `managers.py`'s `UserManager(BaseUserManager)` —
-`create_user(username, email, password=None, **extra)` and
-`create_superuser(username, email, password, **extra)`. `AbstractBaseUser` requires a manager
-and the guide's Phase 0 item 1 doesn't mention one; omitting it isn't an option. `create_superuser`
-sets `is_staff=True, is_superuser=True` directly — this is the one place in the whole package
-those fields are written outside a superuser-gated HTTP path, and it's safe *because* it has no
-HTTP path at all: it's reachable only from `createsuperuser`/a shell/a data migration, never a
-request. Documented here so Phase 2 doesn't read it as a violation of §0 item 3.
+`create_user(username=None, email=None, password=None, **extra)` and
+`create_superuser(username=None, email=None, password=None, **extra)` (widened in v1.1.0; see
+below). `AbstractBaseUser` requires a manager and the guide's Phase 0 item 1 doesn't mention one;
+omitting it isn't an option. `create_superuser` sets `is_staff=True, is_superuser=True` directly —
+this is the one place in the whole package those fields are written outside a superuser-gated
+HTTP path, and it's safe *because* it has no HTTP path at all: it's reachable only from
+`createsuperuser`/a shell/a data migration, never a request. Documented here so a later reader
+doesn't read it as a violation of §0 item 3.
+
+**v1.1.0 — flexible identity (§10 item 21).** Both `email` and `phone` are now optional; at
+least one is required. This is what lets an external auth app (e.g. `../django-jwt-multiauth`'s
+`UserProvisioningService.get_or_create`, frozen against this exact shape — see that package's own
+`docs/CONTRACT.md` §11 item 19) create a user knowing only a phone number or only an email, the
+shape a phone-OTP or email-OTP registration genuinely has at creation time.
+
+- **The floor is a DB-level `CheckConstraint`**, not merely a manager or serializer check —
+  because an external provisioning path writes fields directly and calls plain `.save()`, never
+  this app's own `UserManager` or a serializer. `AbstractDynamicUser.save()` is the
+  readable-`ValidationError` layer in front of it; `bulk_create`/raw SQL through the ORM still
+  hits the constraint directly.
+- **`username` is auto-generated when omitted** (`dynamic_user/usernames.py`,
+  `generate_username(model)`): `DYNAMIC_USER["USERNAME_PREFIX"]` (default `"user_"`) +
+  `secrets.token_hex(8)`, checked against the resolved model for an in-process collision, with
+  `save()` retrying once on the DB's own unique-index rejection. `DYNAMIC_USER["USERNAME_GENERATOR"]`
+  (a dotted path, `None` by default) overrides the built-in generator entirely;
+  `DYNAMIC_USER["USERNAME_AUTO_GENERATE"] = False` makes a missing username raise instead.
+- **`REQUIRED_FIELDS` is now `[]`** (was `["email"]`) — email is no longer guaranteed to exist, so
+  it can no longer be a `REQUIRED_FIELDS` entry. This only loosens what `createsuperuser` prompts
+  for; the email-or-phone rule itself is unaffected and still enforced by `save()`/the constraint.
+- **`email`/`phone` empty-string normalizes to `None`** in `save()` — what makes `unique=True`
+  safe on both; without it a second row saved with `""` would violate the unique index instead of
+  being treated as "not set."
+- **`PHONE_VALIDATORS`/`NAME_VALIDATORS` now actually run**, from inside `save()`'s identity
+  validation step — previously declared in §6 but never wired to a call site.
+- **No migration needed for a host on the shipped concrete models** beyond `migrate` itself (this
+  package's own `0002_optional_identity` migration ships pre-built); a host that subclassed
+  `AbstractDynamicUser` runs `makemigrations` once. **Host action.**
 
 ### `AbstractProfile` + concrete `Profile`
 
@@ -350,6 +393,38 @@ Payload: user_id: int, mode: str"""
 profile_updated = django.dispatch.Signal()
 """Sent by ProfileService.update() when at least one field actually changed. sender=get_profile_model().
 Payload: user_id: int, changed_fields: list[str]"""
+
+# --- v1.1.0 additions, all additive — no existing signal's name/sender/payload/send-site changed
+
+user_created = django.dispatch.Signal()
+"""Sent by an always-connected post_save(created=True) receiver on the user model — unconditional,
+unlike profile_created/setting_created (no AUTO_CREATE_* guard exists for the user row itself).
+sender=get_user_model(). Payload: user_id: int.
+
+Connected LAST in apps.py's ready(), after connect_profile_auto_provisioning()/
+connect_setting_auto_provisioning() — Django dispatches post_save receivers for one sender in
+connection order, so a user_created receiver may rely on Profile/Setting already existing (when
+enabled) with no extra query."""
+
+user_updated = django.dispatch.Signal()
+"""Sent by UserService.update() when at least one field actually changed — same shape as
+profile_updated. sender=get_user_model(). Payload: user_id: int, changed_fields: list[str]"""
+
+setting_updated = django.dispatch.Signal()
+"""Sent by SettingService.update() when at least one field actually changed — closes the
+asymmetry with profile_updated this contract's §11 had left open. sender=get_setting_model().
+Payload: user_id: int, changed_fields: list[str]"""
+
+user_deleted = django.dispatch.Signal()
+"""Sent by UserService.delete() — the admin DELETE /{id}/ endpoint, superuser-only, always.
+user_id captured before the delete, same reasoning as deletion_finalized. sender=get_user_model().
+Payload: user_id: int, actor_id: int | None"""
+
+user_password_set = django.dispatch.Signal()
+"""Sent by UserService.set_password() — the admin POST /{id}/set-password/ endpoint,
+superuser-only, always. Carries no password material — enough for a host or a separate auth-app
+package to revoke every existing session for this user. sender=get_user_model().
+Payload: user_id: int, actor_id: int | None"""
 ```
 
 **Minimality argument, per field:**
@@ -420,8 +495,48 @@ class ProfileService:
 class SettingService:
     @staticmethod
     def update(user: AbstractBaseUser, validated_data: dict) -> AbstractSetting:
-        """Writes validated_data onto user's Setting (get_setting_model()). No signal — Setting
-        changes are not currently part of the versioned-contract surface (§11 open item)."""
+        """Writes validated_data onto user's Setting (get_setting_model()), sends setting_updated
+        with changed_fields if anything actually changed (v1.1.0 — closes the §11 open item that
+        used to leave this silent)."""
+        ...
+
+
+class UserService:
+    """v1.1.0. The only place a user create/update/delete/password-set happens outside
+    UserManager itself (create) or Django's own admin forms. Resolves the user model through
+    django.contrib.auth.get_user_model() — never a concrete import. None of the
+    privilege-escalation guarding lives here — that is a view-layer concern
+    (permissions.CanEscalatePrivilege/IsSuperUser), enforced before a view ever calls in."""
+
+    @staticmethod
+    def create(*, password: str | None = None, **fields) -> AbstractBaseUser:
+        """Creates a user via UserManager.create_user — the one call site that keeps identity
+        validation and username generation happening exactly once, inside
+        AbstractDynamicUser.save(). username/email are both optional keys within fields."""
+        ...
+
+    @staticmethod
+    def update(
+        user: AbstractBaseUser, validated_data: dict, *, actor: AbstractBaseUser | None = None
+    ) -> AbstractBaseUser:
+        """Writes validated_data onto user, sends user_updated with changed_fields if anything
+        actually changed — same diff-and-signal shape as ProfileService.update. Raises
+        django.core.exceptions.ValidationError if the write would violate the email-or-phone
+        rule — views translate this to a 400."""
+        ...
+
+    @staticmethod
+    def set_password(
+        user: AbstractBaseUser, raw_password: str, *, actor: AbstractBaseUser | None = None
+    ) -> None:
+        """Validates raw_password against AUTH_PASSWORD_VALIDATORS (Django's own setting — this
+        app defines no opinionated password policy of its own), sets it, sends
+        user_password_set."""
+        ...
+
+    @staticmethod
+    def delete(user: AbstractBaseUser, *, actor: AbstractBaseUser | None = None) -> None:
+        """Deletes user outright and sends user_deleted, user_id captured before the delete."""
         ...
 
 
@@ -458,6 +573,15 @@ class DeletionService:
         """Raises InvalidDeletionState if the user's current request is not PENDING (already
         approved/rejected/finalized, or no request exists at all)."""
         ...
+
+    @staticmethod
+    def cancel_by_id(request_id: int) -> None:
+        """v1.1.0. Admin-side cancel — same no-dedicated-status reasoning as .cancel(), but
+        reached by request id rather than only the caller's own row. Accepts PENDING *or*
+        APPROVED (unlike .cancel(), PENDING-only) — an admin reasonably wants to withdraw a
+        request they already approved but haven't finalized yet. Raises InvalidDeletionState
+        otherwise."""
+        ...
 ```
 
 **Requires another app package: No.**
@@ -483,6 +607,7 @@ All throttle scopes are **literal strings** (see §10 item 1 for why `appkit.thr
 | `POST` | `/me/deletion-request/` | `IsAuthenticated` | `dynamic_user_deletion_request` | `{"reason": str}` (optional) | `201` with the created request, or `409` (`DeletionRequestAlreadyExists`) if one is already pending/approved |
 | `GET` | `/me/deletion-request/` | `IsAuthenticated` | `dynamic_user_deletion_request` | — | The caller's current request, or `404` if none exists |
 | `DELETE` | `/me/deletion-request/` | `IsAuthenticated` | `dynamic_user_deletion_request` | — | `204` via `DeletionService.cancel`; `409` (`InvalidDeletionState`) if not currently pending |
+| `PATCH` | `/me/` | `IsAuthenticated` | `dynamic_user_me_update` | `USER_SELF_EDITABLE_FIELDS` minus `USER_LOCKED_FIELDS` subset (default: just `name`) | **v1.1.0.** Updated user via `UserService.update`, read back through `USER_READ_FIELDS`. Deliberately name-only by default — see §6's own note on why this is a new key, not a wire-up of the older `USER_EDITABLE_FIELDS` |
 
 Every object on this surface is resolved from `request.user` — never a URL-supplied id — except
 `GET /profiles/{id}/`, whose entire purpose is looking up *someone else's* public data; that view
@@ -498,15 +623,45 @@ already-`/users`-suffixed basePath; flagged in §10 item 7). All gated by the ad
 | Method | Path | Extra gate | Throttle scope | Request | Response |
 |---|---|---|---|---|---|
 | `GET` | `/` | — | `dynamic_user_admin_users_list` | query: filters via `appkit.validation.validate_query_params`/`safe_filter_kwargs` | Paginated (`appkit.pagination.DefaultPagination`), full `USER_READ_FIELDS` (admin sees everything except `password`) |
+| `POST` | `/` | `CanEscalatePrivilege` | `dynamic_user_admin_user_create` | Any user field, plus optional write-only `password` | **v1.1.0.** `201` via `UserService.create` — no password → `set_unusable_password()`. `403` (whole request rejected) if a non-superuser's body touches a gated field; `400` if neither email nor phone is given |
 | `GET` | `/{id}/` | — | `dynamic_user_admin_user_retrieve` | — | Single user, full fields except `password` |
 | `PATCH` | `/{id}/` | `CanEscalatePrivilege` | `dynamic_user_admin_user_update` | Any user field except `password` | See gate rule below. `403` (whole request rejected) if a non-superuser's body touches a gated field |
+| `DELETE` | `/{id}/` | **superuser-only, always** | `dynamic_user_admin_user_delete` | — | **v1.1.0.** `UserService.delete` — hard-deletes outright, bypassing the account-deletion review flow entirely. Same floor as `.../finalize/`, same reasoning: irreversible |
+| `POST` | `/{id}/set-password/` | **superuser-only, always** | `dynamic_user_admin_user_set_password` | `{"password": str}` | **v1.1.0.** `UserService.set_password` — runs `AUTH_PASSWORD_VALIDATORS`, sends `user_password_set`. `204` |
 | `GET` | `/{id}/profile/` | — | `dynamic_user_admin_profile_update` | — | Every real field on the resolved Profile model (full-fields `build_serializer()` call, not `PROFILE_EDITABLE_FIELDS`) |
 | `PATCH` | `/{id}/profile/` | — | `dynamic_user_admin_profile_update` | Any Profile field | Updated via `ProfileService.update(target_user, ...)` |
 | `GET` | `/{id}/setting/` | — | `dynamic_user_admin_setting_update` | — | Every real field on the resolved Setting model |
 | `PATCH` | `/{id}/setting/` | — | `dynamic_user_admin_setting_update` | Any Setting field | Updated via `SettingService.update(target_user, ...)` |
+| `GET` | `/profiles/` | — | `dynamic_user_admin_profiles_list` | query: filters via `safe_filter_kwargs` | **v1.1.0.** Paginated collection over every Profile row — unlike self-service `GET /profiles/`, not restricted to `is_public=True`. The admin *collection* `ProfileAdmin`'s own changelist already provided |
+| `POST` | `/profiles/` | — | `dynamic_user_admin_profile_create` | Any Profile field, including `user` | **v1.1.0.** `user` is writable here only (unlike `PATCH /{id}/profile/`) — naming which user this new row belongs to is the point of a create call. Duplicate `user` → `400` (DRF's auto `UniqueValidator`) |
+| `GET` | `/profiles/{profile_id}/` | — | `dynamic_user_admin_profile_detail` | — | **v1.1.0.** Keyed by the Profile row's own pk, not the owning user's id |
+| `PATCH` | `/profiles/{profile_id}/` | — | `dynamic_user_admin_profile_detail` | Any Profile field | **v1.1.0.** Via `ProfileService.update` |
+| `DELETE` | `/profiles/{profile_id}/` | — | `dynamic_user_admin_profile_detail` | — | **v1.1.0.** Deletes the row outright |
+| `GET` | `/settings/` | — | `dynamic_user_admin_settings_list` | query: filters via `safe_filter_kwargs` | **v1.1.0.** Same shape as `GET /profiles/`, for Setting |
+| `POST` | `/settings/` | — | `dynamic_user_admin_setting_create` | Any Setting field, including `user` | **v1.1.0.** Same shape as `POST /profiles/` |
+| `GET` | `/settings/{setting_id}/` | — | `dynamic_user_admin_setting_detail` | — | **v1.1.0.** Keyed by the Setting row's own pk |
+| `PATCH` | `/settings/{setting_id}/` | — | `dynamic_user_admin_setting_detail` | Any Setting field | **v1.1.0.** Via `SettingService.update` |
+| `DELETE` | `/settings/{setting_id}/` | — | `dynamic_user_admin_setting_detail` | — | **v1.1.0.** Deletes the row outright |
 | `GET` | `/deletion-requests/` | — | `dynamic_user_admin_deletions_list` | query: `status` filter | Paginated `AccountDeletionRequest` list |
+| `POST` | `/deletion-requests/` | — | `dynamic_user_admin_deletion_request_create` | `{"user": int, "reason": str}` | **v1.1.0.** An admin filing a deletion request on a user's behalf, via `DeletionService.request` (never the model layer directly) — respects the same duplicate guard, `finalize_at` computation, and `deletion_requested` signal every other creation path gets. `409` on duplicate |
+| `GET` | `/deletion-requests/{id}/` | — | `dynamic_user_admin_deletion_request_detail` | — | **v1.1.0.** Backs the frontend SDK's previously-unpopulated `deletionRequest(id)` key |
+| `DELETE` | `/deletion-requests/{id}/` | — | `dynamic_user_admin_deletion_request_cancel` | — | **v1.1.0.** `DeletionService.cancel_by_id` — a `PENDING` or `APPROVED` request only (unlike self-service `.cancel()`, `PENDING`-only). `409` if already `REJECTED`/`FINALIZED` |
 | `POST` | `/deletion-requests/{id}/review/` | — | `dynamic_user_admin_deletion_review` | `{"approved": bool}` | `DeletionService.review(request_id, approved=..., reviewed_by=request.user)`. `200` with the full admin deletion-request shape (includes `user`/`reviewed_by`, unlike the self-service serializer); `409` if not currently `PENDING` |
 | `POST` | `/deletion-requests/{id}/finalize/` | **superuser-only, always** | `dynamic_user_admin_deletion_finalize` | — | `DeletionService.finalize(request_id)`, bypassing `finalize_at`. `204` on success (a `hard_delete` leaves no row to serialize); `403` for any non-superuser regardless of `ADMIN_REQUIRES_SUPERUSER`; `409` if not currently `APPROVED` |
+| `GET` | `/change-log/` | — | `dynamic_user_admin_change_log_list` | query: filters via `safe_filter_kwargs` | **v1.1.0.** Paginated `ChangeLogEntry` list — `HistoryMixin`'s own audit trail, previously readable only through Django Admin's `ChangeLogEntryAdmin` |
+| `GET` | `/change-log/{id}/` | — | `dynamic_user_admin_change_log_detail` | — | **v1.1.0.** No `PATCH` — a change-log row is write-once by design, on both interfaces |
+| `DELETE` | `/change-log/{id}/` | **superuser-only, always** | `dynamic_user_admin_change_log_detail` | — | **v1.1.0.** An audit row deleted by anything less is exactly the tampering an audit trail exists to make visible. Matches the tightened `ChangeLogEntryAdmin` gate (§10) |
+| `GET` | `/log-entries/` | — | `dynamic_user_admin_log_entries_list` | query: filters via `safe_filter_kwargs` | **v1.1.0.** Django's own `django.contrib.admin.models.LogEntry` — every write made through Django Admin is auto-logged here already. **Only wired (route + `LogEntryAdmin`) when `django.contrib.admin` is installed** |
+| `GET` | `/log-entries/{id}/` | — | `dynamic_user_admin_log_entry_detail` | — | **v1.1.0.** Same install guard as the list route |
+| `DELETE` | `/log-entries/{id}/` | **superuser-only, always** | `dynamic_user_admin_log_entry_detail` | — | **v1.1.0.** Matches the tightened `LogEntryAdmin.has_delete_permission` |
+| `GET` | `/groups/` | — | `dynamic_user_admin_groups_list` | — | **v1.1.0.** Read-only — populates the picker behind `PATCH /{id}/`'s `groups` field. Full `Group` CRUD stays `django.contrib.auth`'s own admin surface |
+| `GET` | `/groups/{id}/` | — | `dynamic_user_admin_group_detail` | — | **v1.1.0.** |
+| `GET` | `/permissions/` | — | `dynamic_user_admin_permissions_list` | — | **v1.1.0.** Read-only — populates the picker behind `PATCH /{id}/`'s `user_permissions` field |
+
+Every admin-API write (`POST`/`PATCH`/`DELETE` above) now writes a `django.contrib.admin.models.
+LogEntry` row too (**v1.1.0**, `audit.py`'s `log_admin_action`, no-op when `django.contrib.admin`
+isn't installed) — closing the asymmetry where a Django Admin write was always audited and an
+admin-API write never was.
 
 **The privilege-escalation gate, spelled out explicitly so it cannot be implemented as "any staff
 user can PATCH anything":**
@@ -536,6 +691,17 @@ user can PATCH anything":**
   period entirely) that a staff-level admin dashboard should never be able to trigger by accident
   or by a compromised staff account — a stricter floor than the general admin gate, not something
   the setting can loosen.
+- **v1.1.0 extends this same unconditional-superuser floor to three more irreversible actions:**
+  `DELETE /{id}/` (hard-deletes a user, bypassing the deletion-review flow entirely),
+  `POST /{id}/set-password/` (the closest thing on this surface to a full account takeover), and
+  `DELETE /change-log/{id}/`/`DELETE /log-entries/{id}/` (deleting an audit row is exactly the
+  tampering an audit trail exists to make visible). None of these four is loosened by
+  `ADMIN_REQUIRES_SUPERUSER=False`.
+- **v1.1.0's `POST /`/`POST /profiles/`/`POST /settings/`/`POST /deletion-requests/` are gated by
+  `IsDynamicUserAdmin` (staff-or-superuser, per the setting) only** — creating a row is not, by
+  itself, irreversible the way the four actions above are. `POST /` additionally carries
+  `CanEscalatePrivilege`, since its body can contain the same privileged fields `PATCH /{id}/`
+  can.
 
 **Requires another app package: No.**
 
@@ -575,6 +741,10 @@ Django's `swappable_dependency()` machinery expects a top-level setting name:
 | `DELETION_ANONYMIZE_FUNCTION` | `None` | Dotted path to a callable `(user) -> None`, called by `.finalize()` when `DELETION_MODE="anonymize"`. `None` while `DELETION_MODE="anonymize"` is `ImproperlyConfigured` at check time — fails closed, never silently falls back to hard-delete |
 | `DELETION_HISTORY_RETENTION_DAYS` | `90` | Default window `tasks.purge_deletion_history` uses when not passed an explicit `older_than_days` |
 | `LAST_SEEN_UPDATE_SECONDS` | `300` | Minimum interval `LastSeenMixin`'s update path (a host-wired hook, not a view this package ships) writes a new `last_seen_at`, to avoid a write per request |
+| `USER_SELF_EDITABLE_FIELDS` | `["name"]` | **v1.1.0.** Fields `PATCH /me/` accepts (minus `USER_LOCKED_FIELDS`) — deliberately a **separate** key from `USER_EDITABLE_FIELDS`, not a wire-up of that older key: `USER_EDITABLE_FIELDS`'s default (`["name", "phone"]`) would let a self-service caller rewrite their own `phone` unverified, a real concern for a host running phone-OTP where `phone` doubles as a login identifier. Narrowing `USER_EDITABLE_FIELDS`'s own default to fix that would be a MAJOR bump (§11); a new key with its own minimal default isn't. A host wanting self-service phone editing adds `"phone"` here |
+| `USERNAME_AUTO_GENERATE` | `True` | **v1.1.0.** `False` makes a missing username at `save()` time raise `ValidationError` instead of auto-generating one |
+| `USERNAME_GENERATOR` | `None` | **v1.1.0.** Dotted path to a host callable `(model) -> str`. Unset uses the built-in generator (`usernames.py`): `USERNAME_PREFIX` + `secrets.token_hex(8)` |
+| `USERNAME_PREFIX` | `"user_"` | **v1.1.0.** Prefix for the built-in generator only; ignored when `USERNAME_GENERATOR` is set |
 
 **Field-allowlist ↔ model resolution rule (decision confirmed with the user, §10 item 9):** a
 name in any `*_FIELDS` list that doesn't exist on the *resolved* model (via `resolution.py`, never
@@ -625,21 +795,54 @@ there is no reliable way to target "that other user's session" from a mutation's
 | `useMyDeletionRequest()` | `GET /me/deletion-request/` | `dynamicUserKeys.myDeletionRequest()` | — (query) |
 | `useRequestDeletion()` | `POST /me/deletion-request/` | — (mutation, **never fires on mount**) | `dynamicUserKeys.myDeletionRequest()` |
 | `useCancelDeletionRequest()` | `DELETE /me/deletion-request/` | — (mutation, **never fires on mount**) | `dynamicUserKeys.myDeletionRequest()` |
+| `useUpdateMe()` | `PATCH /me/` | — (mutation, **never fires on mount**) | `dynamicUserKeys.me()` |
 
 ### Admin
 
 | Hook | Wraps | Query key | Invalidation |
 |---|---|---|---|
 | `useAdminUsers(params)` | `GET /` | `dynamicUserAdminKeys.users(params)` | — (query) |
+| `useCreateAdminUser()` | `POST /` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.users()` |
 | `useAdminUser(id)` | `GET /{id}/` | `dynamicUserAdminKeys.user(id)` | — (query) |
 | `useUpdateAdminUser(id)` | `PATCH /{id}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.user(id)`, `dynamicUserAdminKeys.users()` |
+| `useDeleteAdminUser()` | `DELETE /{id}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.user(id)`, `dynamicUserAdminKeys.users()` |
+| `useSetAdminUserPassword()` | `POST /{id}/set-password/` | — (mutation, **never fires on mount**) | — (no cached read shape includes `password`) |
 | `useAdminUserProfile(id)` | `GET /{id}/profile/` | `dynamicUserAdminKeys.userProfile(id)` | — (query) |
 | `useUpdateAdminUserProfile(id)` | `PATCH /{id}/profile/` | — (mutation) | `dynamicUserAdminKeys.userProfile(id)` |
 | `useAdminUserSetting(id)` | `GET /{id}/setting/` | `dynamicUserAdminKeys.userSetting(id)` | — (query) |
 | `useUpdateAdminUserSetting(id)` | `PATCH /{id}/setting/` | — (mutation) | `dynamicUserAdminKeys.userSetting(id)` |
+| `useAdminProfiles(params)` | `GET /profiles/` | `dynamicUserAdminKeys.profiles(params)` | — (query) |
+| `useCreateAdminProfile()` | `POST /profiles/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.profiles()` |
+| `useAdminProfile(profileId)` | `GET /profiles/{profileId}/` | `dynamicUserAdminKeys.profile(profileId)` | — (query) |
+| `useUpdateAdminProfileById(profileId)` | `PATCH /profiles/{profileId}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.profile(profileId)`, `dynamicUserAdminKeys.profiles()` |
+| `useDeleteAdminProfile()` | `DELETE /profiles/{profileId}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.profile(profileId)`, `dynamicUserAdminKeys.profiles()` |
+| `useAdminSettings(params)` | `GET /settings/` | `dynamicUserAdminKeys.settings(params)` | — (query) |
+| `useCreateAdminSetting()` | `POST /settings/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.settings()` |
+| `useAdminSetting(settingId)` | `GET /settings/{settingId}/` | `dynamicUserAdminKeys.setting(settingId)` | — (query) |
+| `useUpdateAdminSettingById(settingId)` | `PATCH /settings/{settingId}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.setting(settingId)`, `dynamicUserAdminKeys.settings()` |
+| `useDeleteAdminSetting()` | `DELETE /settings/{settingId}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.setting(settingId)`, `dynamicUserAdminKeys.settings()` |
 | `useAdminDeletionRequests(params)` | `GET /deletion-requests/` | `dynamicUserAdminKeys.deletionRequests(params)` | — (query) |
+| `useCreateAdminDeletionRequest()` | `POST /deletion-requests/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.deletionRequests()` |
+| `useAdminDeletionRequest(id)` | `GET /deletion-requests/{id}/` | `dynamicUserAdminKeys.deletionRequest(id)` | — (query) |
+| `useCancelAdminDeletionRequest()` | `DELETE /deletion-requests/{id}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.deletionRequests()`, `dynamicUserAdminKeys.deletionRequest(id)` |
 | `useReviewDeletionRequest()` | `POST /deletion-requests/{id}/review/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.deletionRequests()`, `dynamicUserAdminKeys.deletionRequest(id)` |
 | `useFinalizeDeletionRequest()` | `POST /deletion-requests/{id}/finalize/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.deletionRequests()`, `dynamicUserAdminKeys.deletionRequest(id)` |
+| `useAdminChangeLog(params)` | `GET /change-log/` | `dynamicUserAdminKeys.changeLog(params)` | — (query) |
+| `useAdminChangeLogEntry(id)` | `GET /change-log/{id}/` | `dynamicUserAdminKeys.changeLogEntry(id)` | — (query) |
+| `useDeleteAdminChangeLogEntry()` | `DELETE /change-log/{id}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.changeLog()`, `dynamicUserAdminKeys.changeLogEntry(id)` |
+| `useAdminLogEntries(params)` | `GET /log-entries/` | `dynamicUserAdminKeys.logEntries(params)` | — (query) |
+| `useAdminLogEntry(id)` | `GET /log-entries/{id}/` | `dynamicUserAdminKeys.logEntry(id)` | — (query) |
+| `useDeleteAdminLogEntry()` | `DELETE /log-entries/{id}/` | — (mutation, **never fires on mount**) | `dynamicUserAdminKeys.logEntries()`, `dynamicUserAdminKeys.logEntry(id)` |
+| `useAdminGroups()` | `GET /groups/` | `dynamicUserAdminKeys.groups()` | — (query) |
+| `useAdminGroup(id)` | `GET /groups/{id}/` | `dynamicUserAdminKeys.group(id)` | — (query) |
+| `useAdminPermissions()` | `GET /permissions/` | `dynamicUserAdminKeys.permissions()` | — (query) |
+
+**v1.1.0 added 26 hooks** (`useUpdateMe`, `useCreateAdminUser`, `useDeleteAdminUser`,
+`useSetAdminUserPassword`, the five-hook `useAdminProfiles`/`useAdminSetting`-family collections,
+`useAdminDeletionRequest`/`useCreateAdminDeletionRequest`/`useCancelAdminDeletionRequest`, the
+change-log/log-entry/group/permission read hooks and their two delete mutations) — every hook
+that existed before v1.1.0 is unchanged in name, wrapped route, query key shape, and invalidation
+set.
 
 **Addition to flag (§10 item 10):** `useUpdateAdminUserProfile(id)`/`useUpdateAdminUserSetting(id)`
 are named distinctly from the guide's shared `useAdminUserProfile(id)`/`useAdminUserSetting(id)`
@@ -678,6 +881,30 @@ export const dynamicUserAdminKeys = {
       ? ([...dynamicUserAdminKeys.all, "deletion-requests"] as const)
       : ([...dynamicUserAdminKeys.all, "deletion-requests", params] as const),
   deletionRequest: (id: number) => [...dynamicUserAdminKeys.all, "deletion-requests", id] as const,
+  // v1.1.0 additions — same params === undefined convention as every key above.
+  profiles: (params?: AdminProfilesParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "profiles"] as const)
+      : ([...dynamicUserAdminKeys.all, "profiles", params] as const),
+  profile: (profileId: number) => [...dynamicUserAdminKeys.all, "profiles", profileId] as const,
+  settings: (params?: AdminSettingsParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "settings"] as const)
+      : ([...dynamicUserAdminKeys.all, "settings", params] as const),
+  setting: (settingId: number) => [...dynamicUserAdminKeys.all, "settings", settingId] as const,
+  changeLog: (params?: AdminChangeLogParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "change-log"] as const)
+      : ([...dynamicUserAdminKeys.all, "change-log", params] as const),
+  changeLogEntry: (id: number) => [...dynamicUserAdminKeys.all, "change-log", id] as const,
+  logEntries: (params?: AdminLogEntriesParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "log-entries"] as const)
+      : ([...dynamicUserAdminKeys.all, "log-entries", params] as const),
+  logEntry: (id: number) => [...dynamicUserAdminKeys.all, "log-entries", id] as const,
+  groups: () => [...dynamicUserAdminKeys.all, "groups"] as const,
+  group: (id: number) => [...dynamicUserAdminKeys.all, "groups", id] as const,
+  permissions: () => [...dynamicUserAdminKeys.all, "permissions"] as const,
 };
 ```
 
@@ -690,10 +917,10 @@ position-by-position against a *filtered* live query's own key
 `invalidateQueries({ queryKey: dynamicUserKeys.publicProfiles() })`-style call a mutation makes.
 Dropping the `params` slot entirely on a no-argument call fixes this; see §10 item 18.
 
-Five mutation hooks must never fire on mount, only from an explicit `mutate()` call
-(`APP-DESIGN.md` §12's frontend security checklist): `useRequestDeletion`,
-`useCancelDeletionRequest`, `useUpdateAdminUser`, `useReviewDeletionRequest`,
-`useFinalizeDeletionRequest`.
+**Twenty-three mutation hooks** (nine pre-v1.1.0, plus fourteen added in v1.1.0 — see
+`tests/frontend/mutations-do-not-fire-on-mount.test.tsx` for the exhaustive, individually-proven
+list) must never fire on mount, only from an explicit `mutate()` call (`APP-DESIGN.md` §12's
+frontend security checklist).
 
 **Requires another app package: No** (`appkit`'s `useApiClient`/`ApiClientProvider`/`HttpClient`
 are the declared-dependency exception, per `APP-DESIGN.md` §1.1/§12).
@@ -934,6 +1161,44 @@ Everything not listed here is unchanged from
     `extend_schema(...)` call (§10 item 3 already flags it as unused by any Phase-5 view), so no
     hashed name from it ever reaches the schema in the first place.
 
+21. **v1.1.0 — flexible identity, admin/API parity, ecosystem compatibility.** The largest single
+    change since v1.0.0. Summarized here; the full shape is §1 (model), §3 (five new signals),
+    §4 (`UserService`, `DeletionService.cancel_by_id`), §5 (every new endpoint), §6 (four new
+    settings keys), §7 (26 new hooks). Sub-items:
+    - **`email`/`phone` both optional, at least one required**, enforced by a DB `CheckConstraint`
+      plus `AbstractDynamicUser.save()`. Driven by `../django-jwt-multiauth`'s frozen
+      `UserProvisioningService.get_or_create` contract (that package's own `docs/CONTRACT.md` §11
+      item 19), which creates a user knowing only one identity field and never goes through this
+      app's `UserManager` — the constraint is what makes the rule true regardless.
+    - **`REQUIRED_FIELDS: ["email"] → []`** — loosens `createsuperuser` only; the identity rule
+      itself is unaffected.
+    - **Username auto-generation** (`usernames.py`) when omitted, with three new settings keys
+      (`USERNAME_AUTO_GENERATE`, `USERNAME_GENERATOR`, `USERNAME_PREFIX`) governing it.
+    - **`dynamic_user.E004` implemented** (reserved since Phase 2, per its own §10 item — this
+      contract's own item 21 supersedes that reservation note): the resolved Profile/Setting model
+      must subclass `AbstractProfile`/`AbstractSetting`.
+    - **Every admin/API parity gap the release was scoped around**: user create (`POST /`) and
+      delete (`DELETE /{id}/`), password set (`POST /{id}/set-password/`), profile/setting
+      collections (`/profiles/`, `/settings/`), deletion-request detail/create/cancel, read-only
+      change-log and Django `LogEntry` surfaces, read-only groups/permissions. Every admin-API
+      write now also produces a `LogEntry` row (`audit.py`), matching what Django Admin itself
+      already auto-logs.
+    - **Three Django-Admin-side tightenings**, closing gaps the parity audit found running the
+      *other* direction (admin could do something the API's state machine prevented):
+      `AccountDeletionRequestAdmin` gains a `finalize_selected` action and locks `status`/`user`/
+      `reviewed_by`/`finalize_at` to `readonly_fields`; `ChangeLogEntryAdmin` blocks change
+      entirely and gates delete to superuser; a new `LogEntryAdmin` is registered (Django doesn't
+      register one by default) with the same read-only-plus-superuser-delete shape.
+    - **`management/commands/backfill_user_relations`** — the documented upgrade step for
+      Profile/Setting rows that predate this install or an `AUTO_CREATE_*=False` period.
+      Idempotent; `--dry-run`; `--no-signals`.
+    - **`factories.py` filled in** (was a docstring-only stub) — `UserFactory` (with
+      `phone_only`/`email_only` traits), `ProfileFactory`, `SettingFactory`,
+      `AccountDeletionRequestFactory`.
+    - **No new dependencies** (§9 unchanged) — `Group`/`Permission` are `django.contrib.auth`'s
+      own models (already a hard dependency via `AbstractBaseUser`/`PermissionsMixin`); `LogEntry`
+      is `django.contrib.admin`'s, read only when that app is installed.
+
 ---
 
 ## §11. Semver triggers (concrete, against the names frozen above)
@@ -966,6 +1231,10 @@ Every one of these needs a **Host action:** line in `CHANGELOG.md`, per `CLAUDE.
 - **`PUBLIC_PROFILES_ENABLED`** — should the whole `/profiles/`, `/profiles/{id}/` surface be
   switchable off for a host that never wants a public directory? Not added here; `is_public`
   already lets every individual user opt out, which may be sufficient.
+
+**Resolved in v1.1.0:** the open item that used to read *"should `SettingService.update` send a
+signal, matching `profile_updated`?"* — yes; `setting_updated` now exists (§3), sent under the
+identical diff-and-signal shape `ProfileService.update` already used.
 
 ---
 

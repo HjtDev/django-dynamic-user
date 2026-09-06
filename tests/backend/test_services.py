@@ -151,9 +151,10 @@ def test_setting_update_creates_row_when_missing(user: object) -> None:
     assert get_setting_model().objects.filter(user=user).count() == 1
 
 
-def test_setting_update_emits_no_signal_at_all(user: object) -> None:
-    """SettingService.update is not part of the versioned-contract signal surface — no
-    dynamic_user signal fires for it, ever."""
+def test_setting_update_emits_setting_updated_and_nothing_else(user: object) -> None:
+    """v1.1.0: SettingService.update sends setting_updated with the exact changed_fields —
+    closing the asymmetry with ProfileService.update docs/CONTRACT.md §11 had left open. No
+    other dynamic_user signal fires for it."""
     received: list[tuple[str, dict]] = []
 
     def _make(name: str):
@@ -171,6 +172,7 @@ def test_setting_update_emits_no_signal_at_all(user: object) -> None:
             "deletion_reviewed",
             "deletion_finalized",
             "profile_updated",
+            "setting_updated",
         )
     }
     for name, receiver in receivers.items():
@@ -181,6 +183,25 @@ def test_setting_update_emits_no_signal_at_all(user: object) -> None:
         for name, receiver in receivers.items():
             getattr(signals, name).disconnect(receiver)
 
+    assert len(received) == 1
+    name, kwargs = received[0]
+    assert name == "setting_updated"
+    assert kwargs["user_id"] == user.pk
+    assert set(kwargs["changed_fields"]) == {"language", "notifications_enabled"}
+
+
+def test_setting_update_emits_no_signal_when_nothing_changed(user: object) -> None:
+    setting = get_setting_model().objects.get(user=user)
+    received: list[dict] = []
+
+    def _receiver(sender, **kwargs) -> None:
+        received.append(kwargs)
+
+    signals.setting_updated.connect(_receiver)
+    try:
+        SettingService.update(user, {"language": setting.language})
+    finally:
+        signals.setting_updated.disconnect(_receiver)
     assert received == []
 
 

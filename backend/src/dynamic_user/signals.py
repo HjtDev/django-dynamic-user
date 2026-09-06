@@ -79,6 +79,36 @@ profile_updated = django.dispatch.Signal()
 """Sent by ProfileService.update() when at least one field actually changed.
 sender=get_profile_model(). Payload: user_id: int, changed_fields: list[str]"""
 
+user_created = django.dispatch.Signal()
+"""v1.1.0. Sent by the always-connected post_save(created=True) receiver on the user model —
+unconditional, unlike profile_created/setting_created, since there is no AUTO_CREATE_* guard for
+the user itself. sender=get_user_model(). Payload: user_id: int.
+
+Connected AFTER connect_profile_auto_provisioning()/connect_setting_auto_provisioning() in
+apps.py's ready() — Django dispatches post_save receivers in connection order, so a user_created
+receiver may rely on the new user's Profile/Setting already existing (when AUTO_CREATE_PROFILE/
+AUTO_CREATE_SETTING are enabled), without an extra query to check."""
+
+user_updated = django.dispatch.Signal()
+"""v1.1.0. Sent by UserService.update() when at least one field actually changed — the same shape
+as profile_updated. sender=get_user_model(). Payload: user_id: int, changed_fields: list[str]"""
+
+setting_updated = django.dispatch.Signal()
+"""v1.1.0. Sent by SettingService.update() when at least one field actually changed — closes the
+asymmetry with profile_updated that docs/CONTRACT.md's §11 left as an open item.
+sender=get_setting_model(). Payload: user_id: int, changed_fields: list[str]"""
+
+user_deleted = django.dispatch.Signal()
+"""v1.1.0. Sent by UserService.delete() — the admin DELETE /{id}/ endpoint, superuser-only,
+always. user_id is captured before the delete, the same reasoning as deletion_finalized.
+sender=get_user_model(). Payload: user_id: int, actor_id: int | None"""
+
+user_password_set = django.dispatch.Signal()
+"""v1.1.0. Sent by UserService.set_password() — the admin POST /{id}/set-password/ endpoint,
+superuser-only, always. Carries no password material, only who and whom — enough for a host or
+the separate auth-app package to revoke every existing session for this user.
+sender=get_user_model(). Payload: user_id: int, actor_id: int | None"""
+
 
 def _provision_profile(sender: type[Model], instance: Any, created: bool, **kwargs: Any) -> None:
     """The connected receiver body. Re-reads ``AUTO_CREATE_PROFILE`` at call time (not just at
@@ -115,6 +145,15 @@ def _provision_setting(sender: type[Model], instance: Any, created: bool, **kwar
         setting_created.send(sender=model, user_id=instance.pk)
 
 
+def _notify_user_created(sender: type[Model], instance: Any, created: bool, **kwargs: Any) -> None:
+    """v1.1.0. The connected receiver body behind ``user_created`` — unconditional, no
+    ``AUTO_CREATE_*``-style guard, since there is no "don't fire this" case for the user row
+    itself (unlike Profile/Setting, which a host can genuinely opt out of provisioning)."""
+    if not created:
+        return
+    user_created.send(sender=type(instance), user_id=instance.pk)
+
+
 def connect_profile_auto_provisioning() -> None:
     """Connect the ``post_save(created=True)`` receiver that auto-creates a Profile row for a
     newly created user and sends ``profile_created``.
@@ -148,4 +187,19 @@ def connect_setting_auto_provisioning() -> None:
         _provision_setting,
         sender=settings.AUTH_USER_MODEL,
         dispatch_uid="dynamic_user.provision_setting",
+    )
+
+
+def connect_user_created() -> None:
+    """v1.1.0. Connect the unconditional ``post_save(created=True)`` receiver that sends
+    ``user_created`` — called from ``apps.py``'s ``ready()`` with no settings guard, and always
+    *after* :func:`connect_profile_auto_provisioning`/:func:`connect_setting_auto_provisioning`,
+    so a ``user_created`` receiver connected by a host can rely on this connection order: Django
+    dispatches ``post_save`` receivers for one sender in the order they were connected, so
+    Profile/Setting provisioning (when enabled) has already run by the time ``user_created``
+    fires."""
+    post_save.connect(
+        _notify_user_created,
+        sender=settings.AUTH_USER_MODEL,
+        dispatch_uid="dynamic_user.notify_user_created",
     )

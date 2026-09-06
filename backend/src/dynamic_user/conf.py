@@ -73,6 +73,18 @@ Twenty keys, all optional at the Python level (``docs/CONTRACT.md`` §6)::
         "LAST_SEEN_UPDATE_SECONDS": 300,
         # Minimum interval LastSeenMixin's update path (a host-wired hook, not a view this
         # package ships) writes a new last_seen_at, to avoid a write per request.
+        "USER_SELF_EDITABLE_FIELDS": ["name"],
+        # v1.1.0. Fields PATCH /me/ accepts, minus USER_LOCKED_FIELDS — deliberately separate
+        # from USER_EDITABLE_FIELDS (the admin-side baseline, still unwired to any self-service
+        # route) so this default can stay minimal without narrowing that older key.
+        "USERNAME_AUTO_GENERATE": True,
+        # v1.1.0. False makes a missing username at save() time a ValidationError instead of an
+        # auto-generated one — a host opting back into the pre-1.1.0 strictness.
+        "USERNAME_GENERATOR": None,
+        # v1.1.0. Dotted path to a host callable (model) -> str. Unset uses the built-in
+        # generator (usernames.py): USERNAME_PREFIX + secrets.token_hex(8).
+        "USERNAME_PREFIX": "user_",
+        # v1.1.0. Prefix for the built-in generator only; ignored when USERNAME_GENERATOR is set.
     }
 
 Zero ``.env`` keys, required or optional, under any installed extra (``docs/CONTRACT.md`` §6) —
@@ -113,6 +125,10 @@ DEFAULTS: Final[dict[str, Any]] = {
     "DELETION_ANONYMIZE_FUNCTION": None,
     "DELETION_HISTORY_RETENTION_DAYS": 90,
     "LAST_SEEN_UPDATE_SECONDS": 300,
+    "USER_SELF_EDITABLE_FIELDS": ["name"],
+    "USERNAME_AUTO_GENERATE": True,
+    "USERNAME_GENERATOR": None,
+    "USERNAME_PREFIX": "user_",
 }
 
 #: The two top-level swappable-model settings (never DYNAMIC_USER keys — Django's

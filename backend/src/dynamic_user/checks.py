@@ -18,10 +18,11 @@ ID → function table:
   (``docs/CONTRACT.md`` §6) caught at ``manage.py check`` time; ``services.DeletionService
   .finalize()`` raises the same ``ImproperlyConfigured`` at call time as the backstop for a
   command that skipped system checks.
-* ``dynamic_user.E004`` — reserved for Phase 2: the resolved model does not subclass this app's
-  own ``AbstractProfile``/``AbstractSetting``. Cannot be implemented until those abstract bases
-  exist (``docs/CONTRACT.md`` §1, built in Phase 2) — ``models.py`` ships empty in Phase 1 by
-  design (this phase's own build prompt, item 8).
+* ``dynamic_user.E004`` — the resolved ``DYNAMIC_USER_PROFILE_MODEL``/``_SETTING_MODEL`` does not
+  subclass this app's own ``AbstractProfile``/``AbstractSetting`` — a host swapping in a model
+  that shares neither the O2O ``user`` field name nor any other shape this package's
+  services/serializers assume. Implemented in v1.1.0, once a real host had actually shipped a
+  model to check this against (docs/CONTRACT.md §1).
 * ``dynamic_user.E005`` — a name in a ``*_FIELDS`` allowlist that doesn't exist on the resolved
   model it's checked against (``docs/CONTRACT.md`` §6). One of two cooperating mechanisms: this
   check catches it at ``manage.py check``/startup time; ``serializers.build_serializer()`` (via
@@ -103,6 +104,47 @@ def _check_model_setting(setting_name: str, value: str) -> list[CheckMessage]:
     return []
 
 
+def check_model_subclasses(
+    app_configs: Sequence[AppConfig] | None, **kwargs: Any
+) -> list[CheckMessage]:
+    """``dynamic_user.E004`` — the resolved Profile/Setting model must subclass this app's own
+    ``AbstractProfile``/``AbstractSetting``. A host model that doesn't is missing the O2O
+    ``user`` field (or field name) every service/view in this package assumes exists, and would
+    otherwise fail confusingly deep inside ``ProfileService.update``/``get_or_create`` instead of
+    at ``manage.py check`` time.
+
+    Imports ``dynamic_user.models`` function-locally — the abstract bases, never a concrete
+    ``Profile``/``Setting`` — for the same "don't make DRF/other heavy imports eager for every
+    host" reasoning ``check_field_allowlists`` already documents; here it's this package's own
+    ``models.py`` that would otherwise become a required-at-``apps.py``-import-time dependency.
+    Skips a model whose swappable-model setting is already malformed (``E001``/``E002`` cover
+    that) rather than letting resolution's own exception propagate out of a system check.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+
+    from dynamic_user.models import AbstractProfile, AbstractSetting
+
+    errors: list[CheckMessage] = []
+    checks: list[tuple[str, Callable[[], Any], type[Any]]] = [
+        ("DYNAMIC_USER_PROFILE_MODEL", resolution.get_profile_model, AbstractProfile),
+        ("DYNAMIC_USER_SETTING_MODEL", resolution.get_setting_model, AbstractSetting),
+    ]
+    for setting_name, get_model, abstract_base in checks:
+        try:
+            model = get_model()
+        except ImproperlyConfigured:
+            continue
+        if not issubclass(model, abstract_base):
+            errors.append(
+                Error(
+                    f"{setting_name} names '{model._meta.label}', which does not subclass "
+                    f"dynamic_user.models.{abstract_base.__name__}.",
+                    id="dynamic_user.E004",
+                )
+            )
+    return errors
+
+
 def check_deletion_settings(
     app_configs: Sequence[AppConfig] | None, **kwargs: Any
 ) -> list[CheckMessage]:
@@ -165,6 +207,7 @@ def check_field_allowlists(
             [
                 "USER_READ_FIELDS",
                 "USER_EDITABLE_FIELDS",
+                "USER_SELF_EDITABLE_FIELDS",
                 "USER_LOCKED_FIELDS",
                 "USER_PUBLIC_FIELDS",
             ],

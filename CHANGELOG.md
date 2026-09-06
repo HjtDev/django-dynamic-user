@@ -12,6 +12,66 @@ that entry gets built from, not a substitute for it.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-06
+
+Admin/API parity, flexible user identity, and ecosystem compatibility with OTP/OAuth-style
+authentication apps (e.g. `django-jwt-multiauth`). Backward compatible — see each item's own note.
+
+### Added
+
+- **Flexible identity**: `email` and `phone` are both now optional; at least one is required,
+  enforced by a DB `CheckConstraint` plus `AbstractDynamicUser.save()` — not bypassable by any
+  creation path, including one that never goes through `UserManager`. A missing `username` is
+  auto-generated (`usernames.py`; `USERNAME_AUTO_GENERATE`/`USERNAME_GENERATOR`/`USERNAME_PREFIX`).
+  **Host action:** run `migrate` (picks up `0002_optional_identity` automatically); if you
+  subclassed `AbstractDynamicUser`, run `makemigrations` for your own app first.
+- **`management/commands/backfill_user_relations`** — idempotent Profile/Setting backfill for
+  rows that predate this install or an `AUTO_CREATE_*=False` period. `--dry-run`, `--no-signals`.
+  **Host action:** run it once after upgrading if your project has existing users.
+- **Admin API parity**: `POST`/`DELETE /{id}/`, `POST /{id}/set-password/`; profile/setting
+  *collections* (`/profiles/`, `/settings/`, keyed by the row's own pk); deletion-request
+  retrieve-by-id/create/admin-cancel; read-only change-log and Django `LogEntry` surfaces
+  (`LogEntry` routes only wired when `django.contrib.admin` is installed); read-only
+  groups/permissions. Every admin-API write now also produces a `LogEntry` row.
+- Self-service `PATCH /me/` — `USER_SELF_EDITABLE_FIELDS` (new key, default `["name"]`).
+- Five new signals: `user_created`, `user_updated`, `setting_updated`, `user_deleted`,
+  `user_password_set`. `user_created` fires after Profile/Setting auto-provisioning by
+  connection order, not incidentally — a receiver can rely on both existing.
+- `UserService` (`create`/`update`/`set_password`/`delete`) and
+  `DeletionService.cancel_by_id`.
+- `dynamic_user.E004` system check implemented (reserved since Phase 2): the resolved
+  Profile/Setting model must subclass `AbstractProfile`/`AbstractSetting`.
+- `dynamic_user.factories` filled in (was a docstring-only stub): `UserFactory` (with
+  `phone_only`/`email_only` traits), `ProfileFactory`, `SettingFactory`,
+  `AccountDeletionRequestFactory`.
+- `PHONE_VALIDATORS`/`NAME_VALIDATORS` now actually run (from `AbstractDynamicUser.save()`) —
+  previously declared but never wired to a call site.
+- Frontend: 26 new hooks (see `README.md`'s "Admin hooks" section for the full list) and matching
+  key-factory entries, all additive.
+- Three Django-Admin tightenings, closing gaps the parity audit found running the *other*
+  direction: `AccountDeletionRequestAdmin` gains a `finalize_selected` action and locks
+  `status`/`user`/`reviewed_by`/`finalize_at` to read-only; `ChangeLogEntryAdmin` blocks change
+  and gates delete to superuser; a new `LogEntryAdmin` is registered (Django doesn't register one
+  by default), read-only plus superuser-only delete.
+- `docs/CLAUDE.md` rule 9: every feature must exist on both Django Admin and the API, a general
+  project convention now, not an admin-specific one.
+
+### Changed
+
+- `REQUIRED_FIELDS: ["email"] → []` on `AbstractDynamicUser` — loosens what `createsuperuser`
+  prompts for only; the email-or-phone rule itself is unaffected and still enforced.
+- `UserManager.create_user`/`create_superuser` signatures widened: `username`/`email` both gained
+  defaults (`None`). Every existing call still resolves identically.
+
+### Fixed
+
+- A second user saved with `phone=""` no longer collides on the unique index — empty string now
+  normalizes to `None` for both `email` and `phone`.
+
+No signal removed or renamed, no `services.py` signature changed (only added to), no settings key
+renamed, no default field allowlist narrowed, no `build_serializer()` signature change, no safety
+rail weakened, no distribution renamed — none of `CLAUDE.md`'s MAJOR-bump triggers fire.
+
 ## [1.0.1] - 2026-09-05
 
 Phase 11 (`docs/PHASE-11-FINDINGS.md`): installed v1.0.0 into two fresh `base-scaffold` clones

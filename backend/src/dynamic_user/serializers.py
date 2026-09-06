@@ -49,6 +49,7 @@ from functools import cache
 from typing import Any, ClassVar, Final, cast
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
 from django.dispatch import receiver
@@ -57,7 +58,7 @@ from drf_spectacular.utils import extend_schema_serializer
 from rest_framework import serializers
 
 from dynamic_user import conf, resolution
-from dynamic_user.models import AccountDeletionRequest
+from dynamic_user.models import AccountDeletionRequest, ChangeLogEntry
 
 #: Never included in any serializer this factory builds, unconditionally — no per-call opt-out,
 #: no alias/`source=` trick around it (see :func:`_build_serializer`'s deny-list check below).
@@ -362,6 +363,28 @@ def get_user_editable_serializer() -> type[serializers.ModelSerializer[Any]]:
     return build_serializer(model, fields)
 
 
+def get_user_self_editable_serializer() -> type[serializers.ModelSerializer[Any]]:
+    """v1.1.0. ``USER_SELF_EDITABLE_FIELDS`` minus ``USER_LOCKED_FIELDS`` — ``PATCH /me/``.
+
+    Deliberately a **separate** key from ``USER_EDITABLE_FIELDS``/
+    :func:`get_user_editable_serializer` rather than wiring that older key to this new route —
+    ``USER_EDITABLE_FIELDS``'s default
+    (``["name", "phone"]``) would let a self-service caller rewrite their own ``phone`` unverified
+    — a real privilege concern for a host running phone-OTP, where ``phone`` doubles as a login
+    identifier. Narrowing ``USER_EDITABLE_FIELDS``'s *own* default to fix that would be a MAJOR
+    bump under this repo's own semver rule (narrowing a default allowlist); a new key with its own
+    minimal default (``["name"]``) delivers the same behavior without one. A host that wants
+    self-service phone editing opts in by adding ``"phone"`` to ``USER_SELF_EDITABLE_FIELDS``
+    itself.
+    """
+    model = get_user_model()
+    locked = frozenset(conf.get_setting("USER_LOCKED_FIELDS"))
+    _validate_known_fields(model, locked, "USER_LOCKED_FIELDS")
+    fields = tuple(f for f in conf.get_setting("USER_SELF_EDITABLE_FIELDS") if f not in locked)
+    _validate_known_fields(model, fields, "USER_SELF_EDITABLE_FIELDS")
+    return _with_component_name(build_serializer(model, fields), "MeUserUpdate")
+
+
 def get_user_public_serializer() -> type[serializers.ModelSerializer[Any]]:
     """``USER_PUBLIC_FIELDS``, entirely read-only — the nested ``user`` block on a public profile
     response."""
@@ -486,6 +509,198 @@ def get_admin_setting_serializer() -> type[serializers.ModelSerializer[Any]]:
         build_serializer(model, _full_field_names(model), read_only_fields=("user",)),
         "AdminSetting",
     )
+
+
+@cache
+def get_admin_user_create_serializer() -> type[serializers.ModelSerializer[Any]]:
+    """v1.1.0. ``POST /`` (admin) — every real field on the resolved user model except
+    ``password`` as a genuine model field, **plus** a hand-added write-only ``password`` — the
+    one exception to ``build_serializer()``'s hard, unconditional ``password`` deny-list, made
+    the same way :func:`get_public_profile_serializer` adds a nested ``user`` field on top of a
+    ``build_serializer()`` base: subclass it rather than teach the factory to special-case a
+    denied name, so the factory's "never emits password, no exceptions" invariant stays literally
+    true for every one of *its own* callers. The view never calls this subclass's own ``.save()``
+    — it extracts ``password`` from ``validated_data`` and routes creation through
+    :meth:`~dynamic_user.services.UserService.create`, so username generation and the
+    email-or-phone rule are enforced exactly once, in
+    :meth:`~dynamic_user.models.AbstractDynamicUser.save`, the same as every other creation path.
+    ``password`` is optional — an admin-created user with none gets
+    ``set_unusable_password()``, via :meth:`~dynamic_user.managers.UserManager.create_user`'s own
+    ``password=None`` handling."""
+    model = get_user_model()
+    base = build_serializer(model, _full_field_names(model))
+    subclass = type(
+        "AdminUserCreateSerializer",
+        (base,),
+        {
+            "password": serializers.CharField(
+                write_only=True, required=False, allow_null=True, default=None
+            ),
+        },
+    )
+    return _with_component_name(
+        cast("type[serializers.ModelSerializer[Any]]", subclass), "AdminUserCreate"
+    )
+
+
+@cache
+def get_admin_profile_create_serializer() -> type[serializers.ModelSerializer[Any]]:
+    """v1.1.0. ``POST /profiles/`` (admin collection) — every real field on the resolved Profile
+    model, ``user`` **writable** (unlike :func:`get_admin_profile_serializer`'s ``PATCH``-time
+    read-only ``user``): the entire point of a create call is naming which user this new row
+    belongs to. The O2O's own DB-level uniqueness surfaces as a normal ``400`` validation error on
+    a duplicate — ``ModelSerializer`` auto-generates a ``UniqueValidator`` for a unique relational
+    field, so a second Profile for the same user never reaches the database at all."""
+    model = resolution.get_profile_model()
+    return _with_component_name(
+        build_serializer(model, _full_field_names(model)), "AdminProfileCreate"
+    )
+
+
+@cache
+def get_admin_setting_create_serializer() -> type[serializers.ModelSerializer[Any]]:
+    """v1.1.0. ``POST /settings/`` (admin collection) — same reasoning as
+    :func:`get_admin_profile_create_serializer`, for Setting."""
+    model = resolution.get_setting_model()
+    return _with_component_name(
+        build_serializer(model, _full_field_names(model)), "AdminSettingCreate"
+    )
+
+
+class AdminSetPasswordSerializer(serializers.Serializer[Any]):
+    """v1.1.0. ``POST /{id}/set-password/``'s request body — the only field a caller may supply.
+    Not a ``ModelSerializer``: the actual write goes through
+    :meth:`~dynamic_user.services.UserService.set_password`, which runs
+    ``AUTH_PASSWORD_VALIDATORS`` itself; this serializer only proves a ``password`` string was
+    given at all."""
+
+    password = serializers.CharField(write_only=True, required=True)
+
+
+@cache
+def get_admin_log_entry_serializer() -> type[serializers.ModelSerializer[Any]]:
+    """v1.1.0. Django's own ``django.contrib.admin.models.LogEntry``, entirely read-only —
+    ``GET /log-entries/``, ``GET /log-entries/{id}/``. Only ever wired to a route when
+    ``django.contrib.admin`` is installed (``admin_views.py``/``urls_admin.py`` both check
+    ``django.apps.apps.is_installed`` before doing so) — imported lazily here, inside the
+    function body, for the same reason: importing ``LogEntry`` at this module's top level would
+    make this module's own import depend on ``django.contrib.admin`` being installed at all,
+    which this package's own ``README``/``CONTRACT`` never require."""
+    from django.contrib.admin.models import LogEntry
+
+    @extend_schema_serializer(component_name="AdminLogEntry")
+    class _AdminLogEntrySerializer(serializers.ModelSerializer[LogEntry]):
+        class Meta:
+            model = LogEntry
+            fields: ClassVar[list[str]] = [
+                "id",
+                "action_time",
+                "user",
+                "content_type",
+                "object_id",
+                "object_repr",
+                "action_flag",
+                "change_message",
+            ]
+            read_only_fields = fields
+
+    return _AdminLogEntrySerializer
+
+
+class AdminLogEntryFilterSerializer(serializers.Serializer[Any]):
+    """v1.1.0. Validates ``GET /log-entries/``'s pagination query params. ``action_flag``/
+    ``user``/``content_type`` are validated by ``safe_filter_kwargs``'s own allowlist in the view
+    (``admin_views.AdminLogEntryListView``), not enumerated here — the same split
+    :class:`AdminUserFilterSerializer` already uses."""
+
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1)
+
+
+class AdminChangeLogEntrySerializer(serializers.ModelSerializer[ChangeLogEntry]):
+    """v1.1.0. ``ChangeLogEntry`` (this app's own audit-log model, concrete/not swappable — see
+    ``models.py``'s docstring), entirely read-only — ``GET /change-log/``,
+    ``GET /change-log/{id}/``."""
+
+    class Meta:
+        model = ChangeLogEntry
+        fields: ClassVar[list[str]] = [
+            "id",
+            "content_type",
+            "object_id",
+            "actor",
+            "field_name",
+            "old_value",
+            "new_value",
+            "changed_at",
+        ]
+        read_only_fields = fields
+
+
+class AdminChangeLogFilterSerializer(serializers.Serializer[Any]):
+    """v1.1.0. Validates ``GET /change-log/``'s pagination query params. ``content_type``/
+    ``object_id``/``actor``/``field_name`` are validated by ``safe_filter_kwargs``'s own allowlist
+    in the view (``admin_views.AdminChangeLogListView``), not enumerated here — the same split
+    :class:`AdminUserFilterSerializer` already uses. (``field_name`` specifically can never be a
+    field *on this serializer* regardless: it collides with ``rest_framework.fields.Field``'s own
+    ``field_name`` instance attribute, which DRF sets internally on every bound field.)"""
+
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1)
+
+
+class AdminGroupSerializer(serializers.ModelSerializer[Group]):
+    """v1.1.0. Read-only — ``GET /groups/``, ``GET /groups/{id}/``, so a dashboard can populate
+    the picker behind ``PATCH /{id}/``'s ``groups`` field. ``Group``/``Permission`` are Django's
+    own ``django.contrib.auth`` models, never swappable, always installed (this whole package
+    already depends on ``django.contrib.auth`` — this is not a new dependency)."""
+
+    class Meta:
+        model = Group
+        fields: ClassVar[list[str]] = ["id", "name", "permissions"]
+        read_only_fields = fields
+
+
+class AdminPermissionSerializer(serializers.ModelSerializer[Permission]):
+    """v1.1.0. Read-only — ``GET /permissions/``, so a dashboard can populate the picker behind
+    ``PATCH /{id}/``'s ``user_permissions`` field."""
+
+    class Meta:
+        model = Permission
+        fields: ClassVar[list[str]] = ["id", "name", "codename", "content_type"]
+        read_only_fields = fields
+
+
+class AdminProfileFilterSerializer(serializers.Serializer[Any]):
+    """v1.1.0. Validates ``GET /profiles/`` (admin collection)'s pagination query params. The
+    *filterable* field names come from the resolved Profile model at request time
+    (``admin_views._filterable_model_fields``), never a static list here — same reasoning as
+    :class:`AdminUserFilterSerializer`."""
+
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1)
+
+
+class AdminSettingFilterSerializer(serializers.Serializer[Any]):
+    """v1.1.0. Same as :class:`AdminProfileFilterSerializer`, for ``GET /settings/`` (admin
+    collection)."""
+
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1)
+
+
+def get_admin_deletion_request_create_serializer() -> type[serializers.Serializer[Any]]:
+    """v1.1.0. ``POST /deletion-requests/`` (admin) — ``{user, reason}``. Not cached: it resolves
+    ``get_user_model()`` into a queryset at call time, and this route is an occasional admin
+    action, not a per-request-hot read path like the cached accessors above."""
+    model = get_user_model()
+
+    @extend_schema_serializer(component_name="AdminDeletionRequestCreate")
+    class _AdminDeletionRequestCreateSerializer(serializers.Serializer[Any]):
+        user = serializers.PrimaryKeyRelatedField(queryset=cast(Any, model)._default_manager.all())
+        reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+    return _AdminDeletionRequestCreateSerializer
 
 
 # ------------------------------------------------------------------------------ deletion request

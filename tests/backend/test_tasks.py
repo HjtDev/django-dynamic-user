@@ -221,3 +221,21 @@ def test_management_command_finalizes_due_rows(user: object) -> None:
 
     due.refresh_from_db()
     assert due.status == AccountDeletionRequest.Status.FINALIZED
+
+
+# --- celery-extra-only behavior ----------------------------------------------------------------
+
+
+@pytest.mark.requires_extra
+def test_tasks_are_real_celery_tasks_when_celery_is_installed() -> None:
+    """The one behavior that's genuinely different with the ``celery`` extra installed: both
+    functions are real, bound ``celery.app.task.Task`` instances (``.delay``/``.apply_async``/a
+    dotted ``.name``), not the plain callables ``tasks.py``'s own no-op ``shared_task`` fallback
+    produces. Deselected on the bare-install leg (``-m 'not requires_extra'``) — asserting this
+    there would fail correctly, for exactly the reason the marker exists."""
+    from celery.app.task import Task
+
+    assert isinstance(tasks.finalize_due_deletions, Task)
+    assert tasks.finalize_due_deletions.name == "dynamic_user.tasks.finalize_due_deletions"
+    assert isinstance(tasks.purge_deletion_history, Task)
+    assert tasks.purge_deletion_history.name == "dynamic_user.tasks.purge_deletion_history"

@@ -39,6 +39,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedAdminUserList'
           description: ''
+    post:
+      operationId: admin_users_create
+      description: v1.1.0. Any user field, plus an optional write-only password (unset
+        -> set_unusable_password()). 403 (whole request rejected) if a non-superuser's
+        body touches is_staff/is_superuser/is_active/groups/user_permissions — the
+        same CanEscalatePrivilege gate PATCH /{id}/ already uses.
+      summary: Create a user (admin)
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUserCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminUserCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminUserCreateRequest'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
   /api/v1/admin/users/{id}/:
     get:
       operationId: admin_users_retrieve
@@ -96,6 +126,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminUser'
           description: ''
+    delete:
+      operationId: admin_users_destroy
+      description: 'v1.1.0. Hard-deletes the user outright, bypassing the account-deletion
+        review flow entirely. Superuser-only, always, regardless of ADMIN_REQUIRES_SUPERUSER
+        — the same floor as POST /deletion-requests/{id}/finalize/, for the same reason:
+        irreversible, and a compromised staff account should never reach it.'
+      summary: Delete a user (admin, superuser-only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/admin/users/{id}/profile/:
     get:
       operationId: admin_users_profile_retrieve
@@ -152,6 +203,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminProfile'
           description: ''
+  /api/v1/admin/users/{id}/set-password/:
+    post:
+      operationId: admin_users_set_password_create
+      description: Runs AUTH_PASSWORD_VALIDATORS; sends user_password_set.
+      summary: Set a user's password (admin, superuser-only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSetPasswordRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminSetPasswordRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminSetPasswordRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/admin/users/{id}/setting/:
     get:
       operationId: admin_users_setting_retrieve
@@ -208,6 +290,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminSetting'
           description: ''
+  /api/v1/admin/users/change-log/:
+    get:
+      operationId: admin_users_change_log_list
+      description: v1.1.0. Paginated, filterable list of ChangeLogEntry rows — HistoryMixin's
+        own audit trail, previously readable only through Django Admin's ChangeLogEntryAdmin.
+      summary: List change-log entries (admin)
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminChangeLogEntryList'
+          description: ''
+  /api/v1/admin/users/change-log/{id}/:
+    get:
+      operationId: admin_users_change_log_retrieve
+      description: |-
+        v1.1.0. ``GET``/``DELETE`` ``/change-log/{id}/``. No ``PATCH`` — a change-log row is
+        write-once, by design (``mixins.HistoryMixin.log_change``), on both interfaces.
+      summary: Retrieve a change-log entry (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChangeLogEntry'
+          description: ''
+    delete:
+      operationId: admin_users_change_log_destroy
+      description: v1.1.0. Superuser-only, always — an audit row deleted by anything
+        less is exactly the tampering an audit trail exists to make visible. Matches
+        the tightened ChangeLogEntryAdmin gate (docs/CONTRACT.md §10).
+      summary: Delete a change-log entry (admin, superuser-only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/admin/users/deletion-requests/:
     get:
       operationId: admin_users_deletion_requests_list
@@ -248,6 +406,78 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedAdminDeletionRequestList'
           description: ''
+    post:
+      operationId: admin_users_deletion_requests_create
+      description: v1.1.0. {user, reason}. 409 if the user already has a pending or
+        approved request.
+      summary: Create an account-deletion request (admin)
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminDeletionRequestCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminDeletionRequestCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminDeletionRequestCreateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDeletionRequest'
+          description: ''
+  /api/v1/admin/users/deletion-requests/{id}/:
+    get:
+      operationId: admin_users_deletion_requests_retrieve
+      description: v1.1.0. Backs the frontend SDK's previously-unpopulated deletionRequest(id)
+        key.
+      summary: Retrieve an account-deletion request (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDeletionRequest'
+          description: ''
+    delete:
+      operationId: admin_users_deletion_requests_destroy
+      description: v1.1.0. DeletionService.cancel_by_id — a PENDING or APPROVED request
+        only. 409 if already REJECTED/FINALIZED.
+      summary: Cancel an account-deletion request (admin)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/admin/users/deletion-requests/{id}/finalize/:
     post:
       operationId: admin_users_deletion_requests_finalize_create
@@ -303,6 +533,442 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminDeletionRequest'
           description: ''
+  /api/v1/admin/users/groups/:
+    get:
+      operationId: admin_users_groups_list
+      description: v1.1.0. Read-only — populates the picker behind PATCH /{id}/'s
+        groups field. Full Group CRUD stays django.contrib.auth's own admin surface.
+      summary: List groups (admin, read-only)
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminGroupList'
+          description: ''
+  /api/v1/admin/users/groups/{id}/:
+    get:
+      operationId: admin_users_groups_retrieve
+      description: v1.1.0. ``GET /groups/{id}/``.
+      summary: Retrieve a group (admin, read-only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminGroup'
+          description: ''
+  /api/v1/admin/users/log-entries/:
+    get:
+      operationId: admin_users_log_entries_list
+      description: v1.1.0. Django's own django.contrib.admin.models.LogEntry — every
+        write made through Django Admin is auto-logged here already; this is the read
+        side for a custom dashboard. Only registered when django.contrib.admin is
+        installed.
+      summary: List Django admin-action log entries (admin, read-only)
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminLogEntryList'
+          description: ''
+  /api/v1/admin/users/log-entries/{id}/:
+    get:
+      operationId: admin_users_log_entries_retrieve
+      description: |-
+        v1.1.0. ``GET``/``DELETE`` ``/log-entries/{id}/``. ``DELETE`` is superuser-only,
+        always, matching the equally-tightened ``LogEntryAdmin.has_delete_permission`` —
+        deleting an audit row is exactly the tampering an audit trail exists to make visible.
+      summary: Retrieve a Django admin-action log entry (admin, read-only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminLogEntry'
+          description: ''
+    delete:
+      operationId: admin_users_log_entries_destroy
+      description: |-
+        v1.1.0. ``GET``/``DELETE`` ``/log-entries/{id}/``. ``DELETE`` is superuser-only,
+        always, matching the equally-tightened ``LogEntryAdmin.has_delete_permission`` —
+        deleting an audit row is exactly the tampering an audit trail exists to make visible.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/admin/users/permissions/:
+    get:
+      operationId: admin_users_permissions_list
+      description: v1.1.0. Read-only — populates the picker behind PATCH /{id}/'s
+        user_permissions field.
+      summary: List permissions (admin, read-only)
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminPermissionList'
+          description: ''
+  /api/v1/admin/users/profiles/:
+    get:
+      operationId: admin_users_profiles_list
+      description: v1.1.0. Paginated, filterable collection over every Profile row
+        — unlike GET /profiles/ on the self-service surface, not restricted to is_public=True.
+        Any concrete, non-relation field on the resolved Profile model is accepted
+        as an exact-match query filter, the same _filterable_model_fields() reasoning
+        as the user list.
+      summary: List profiles (admin)
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminProfileList'
+          description: ''
+    post:
+      operationId: admin_users_profiles_create
+      description: v1.1.0. Any Profile field, including user (writable here only).
+      summary: Create a profile (admin)
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminProfileCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminProfileCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminProfileCreateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminProfile'
+          description: ''
+  /api/v1/admin/users/profiles/{profile_id}/:
+    get:
+      operationId: admin_users_profiles_retrieve
+      description: v1.1.0. Keyed by the Profile row's own pk, not the owning user's
+        id.
+      summary: Retrieve a profile (admin)
+      parameters:
+      - in: path
+        name: profile_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminProfile'
+          description: ''
+    patch:
+      operationId: admin_users_profiles_partial_update
+      description: v1.1.0. Any Profile field, applied via ProfileService.update.
+      summary: Update a profile (admin)
+      parameters:
+      - in: path
+        name: profile_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminProfileRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminProfileRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminProfileRequest'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminProfile'
+          description: ''
+    delete:
+      operationId: admin_users_profiles_destroy
+      description: v1.1.0. Deletes the row outright — Django Admin can already do
+        this.
+      summary: Delete a profile (admin)
+      parameters:
+      - in: path
+        name: profile_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/admin/users/settings/:
+    get:
+      operationId: admin_users_settings_list
+      description: v1.1.0. Same shape as GET /profiles/ (admin collection), for Setting.
+      summary: List settings (admin)
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminSettingList'
+          description: ''
+    post:
+      operationId: admin_users_settings_create
+      description: v1.1.0. Any Setting field, including user (writable here only).
+      summary: Create a setting (admin)
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSettingCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminSettingCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminSettingCreateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSetting'
+          description: ''
+  /api/v1/admin/users/settings/{setting_id}/:
+    get:
+      operationId: admin_users_settings_retrieve
+      description: v1.1.0. Keyed by the Setting row's own pk, not the owning user's
+        id.
+      summary: Retrieve a setting (admin)
+      parameters:
+      - in: path
+        name: setting_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSetting'
+          description: ''
+    patch:
+      operationId: admin_users_settings_partial_update
+      description: v1.1.0. Any Setting field, applied via SettingService.update.
+      summary: Update a setting (admin)
+      parameters:
+      - in: path
+        name: setting_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminSettingRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminSettingRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminSettingRequest'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSetting'
+          description: ''
+    delete:
+      operationId: admin_users_settings_destroy
+      description: v1.1.0. Deletes the row outright — Django Admin can already do
+        this.
+      summary: Delete a setting (admin)
+      parameters:
+      - in: path
+        name: setting_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dynamic-user-admin
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/users/me/:
     get:
       operationId: users_me_retrieve
@@ -311,6 +977,35 @@ paths:
       summary: Get my account info
       tags:
       - dynamic-user
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeUser'
+          description: ''
+    patch:
+      operationId: users_me_partial_update
+      description: v1.1.0. USER_SELF_EDITABLE_FIELDS minus USER_LOCKED_FIELDS, applied
+        via UserService.update — deliberately name-only by default; see get_user_self_editable_serializer()'s
+        own docstring for why.
+      summary: Update my account info
+      tags:
+      - dynamic-user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedMeUserUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedMeUserUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedMeUserUpdateRequest'
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -525,6 +1220,59 @@ paths:
           description: ''
 components:
   schemas:
+    ActionFlagEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      type: integer
+      description: |-
+        * `1` - Addition
+        * `2` - Change
+        * `3` - Deletion
+    AdminChangeLogEntry:
+      type: object
+      description: |-
+        v1.1.0. ``ChangeLogEntry`` (this app's own audit-log model, concrete/not swappable — see
+        ``models.py``'s docstring), entirely read-only — ``GET /change-log/``,
+        ``GET /change-log/{id}/``.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        content_type:
+          type: integer
+          readOnly: true
+        object_id:
+          type: integer
+          readOnly: true
+        actor:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The user who made this change, if known.
+        field_name:
+          type: string
+          readOnly: true
+        old_value:
+          type: string
+          readOnly: true
+        new_value:
+          type: string
+          readOnly: true
+        changed_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actor
+      - changed_at
+      - content_type
+      - field_name
+      - id
+      - new_value
+      - object_id
+      - old_value
     AdminDeletionRequest:
       type: object
       description: |-
@@ -576,6 +1324,102 @@ components:
       - reviewed_by
       - status
       - user
+    AdminDeletionRequestCreateRequest:
+      type: object
+      properties:
+        user:
+          type: integer
+        reason:
+          type: string
+          default: ''
+      required:
+      - user
+    AdminGroup:
+      type: object
+      description: |-
+        v1.1.0. Read-only — ``GET /groups/``, ``GET /groups/{id}/``, so a dashboard can populate
+        the picker behind ``PATCH /{id}/``'s ``groups`` field. ``Group``/``Permission`` are Django's
+        own ``django.contrib.auth`` models, never swappable, always installed (this whole package
+        already depends on ``django.contrib.auth`` — this is not a new dependency).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        permissions:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+      required:
+      - id
+      - name
+      - permissions
+    AdminLogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        action_time:
+          type: string
+          format: date-time
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        content_type:
+          type: integer
+          readOnly: true
+          nullable: true
+        object_id:
+          type: string
+          readOnly: true
+          nullable: true
+        object_repr:
+          type: string
+          readOnly: true
+        action_flag:
+          allOf:
+          - $ref: '#/components/schemas/ActionFlagEnum'
+          readOnly: true
+        change_message:
+          type: string
+          readOnly: true
+      required:
+      - action_flag
+      - action_time
+      - change_message
+      - content_type
+      - id
+      - object_id
+      - object_repr
+      - user
+    AdminPermission:
+      type: object
+      description: |-
+        v1.1.0. Read-only — ``GET /permissions/``, so a dashboard can populate the picker behind
+        ``PATCH /{id}/``'s ``user_permissions`` field.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        codename:
+          type: string
+          readOnly: true
+        content_type:
+          type: integer
+          readOnly: true
+      required:
+      - codename
+      - content_type
+      - id
+      - name
     AdminProfile:
       type: object
       properties:
@@ -594,6 +1438,34 @@ components:
       required:
       - id
       - user
+    AdminProfileCreateRequest:
+      type: object
+      properties:
+        user:
+          type: integer
+        bio:
+          type: string
+        is_public:
+          type: boolean
+          title: Public
+          description: Whether this profile is visible to other users.
+      required:
+      - user
+    AdminSetPasswordRequest:
+      type: object
+      description: |-
+        v1.1.0. ``POST /{id}/set-password/``'s request body — the only field a caller may supply.
+        Not a ``ModelSerializer``: the actual write goes through
+        :meth:`~dynamic_user.services.UserService.set_password`, which runs
+        ``AUTH_PASSWORD_VALIDATORS`` itself; this serializer only proves a ``password`` string was
+        given at all.
+      properties:
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - password
     AdminSetting:
       type: object
       properties:
@@ -614,6 +1486,24 @@ components:
           description: Whether this user receives notifications.
       required:
       - id
+      - user
+    AdminSettingCreateRequest:
+      type: object
+      properties:
+        user:
+          type: integer
+        language:
+          type: string
+          minLength: 1
+          maxLength: 10
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+        notifications_enabled:
+          type: boolean
+          description: Whether this user receives notifications.
+      required:
       - user
     AdminUser:
       type: object
@@ -637,10 +1527,14 @@ components:
           type: string
           maxLength: 150
         email:
-          type: string
-          format: email
+          nullable: true
           title: Email address
-          maxLength: 254
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
         phone:
           type: string
           nullable: true
@@ -672,9 +1566,59 @@ components:
           description: Specific permissions for this user.
       required:
       - date_joined
-      - email
       - id
-      - username
+    AdminUserCreateRequest:
+      type: object
+      properties:
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+        is_superuser:
+          type: boolean
+          title: Superuser status
+          description: Designates that this user has all permissions without explicitly
+            assigning them.
+        username:
+          type: string
+          maxLength: 150
+        name:
+          type: string
+          maxLength: 150
+        email:
+          nullable: true
+          title: Email address
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        phone:
+          type: string
+          nullable: true
+          title: Phone number
+          maxLength: 32
+        is_active:
+          type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        is_staff:
+          type: boolean
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
+        groups:
+          type: array
+          items:
+            type: integer
+          description: The groups this user belongs to. A user will get all permissions
+            granted to each of their groups.
+        user_permissions:
+          type: array
+          items:
+            type: integer
+          description: Specific permissions for this user.
     DeletionRequest:
       type: object
       description: |-
@@ -795,6 +1739,7 @@ components:
           type: string
           format: email
           readOnly: true
+          nullable: true
           title: Email address
         phone:
           type: string
@@ -819,6 +1764,29 @@ components:
       - name
       - phone
       - username
+    PaginatedAdminChangeLogEntryList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminChangeLogEntry'
     PaginatedAdminDeletionRequestList:
       type: object
       required:
@@ -842,6 +1810,121 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminDeletionRequest'
+    PaginatedAdminGroupList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminGroup'
+    PaginatedAdminLogEntryList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminLogEntry'
+    PaginatedAdminPermissionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminPermission'
+    PaginatedAdminProfileList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminProfile'
+    PaginatedAdminSettingList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminSetting'
     PaginatedAdminUserList:
       type: object
       required:
@@ -925,17 +2008,19 @@ components:
             assigning them.
         username:
           type: string
-          minLength: 1
           maxLength: 150
         name:
           type: string
           maxLength: 150
         email:
-          type: string
-          format: email
-          minLength: 1
+          nullable: true
           title: Email address
-          maxLength: 254
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
         phone:
           type: string
           nullable: true
@@ -984,6 +2069,12 @@ components:
         notifications_enabled:
           type: boolean
           description: Whether this user receives notifications.
+    PatchedMeUserUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 150
     PublicProfile:
       type: object
       properties:
