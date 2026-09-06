@@ -76,6 +76,14 @@ project's own and stay real files here.
    `dynamic_user_admin_`), cache namespace `dynamic_user`, **two** frontend basePath keys
    (`dynamic_user` → `/api/v1/users`, `dynamic_user_admin` → `/api/v1/admin/users`), Celery task
    names `dynamic_user.tasks.*`. `APP-DESIGN.md` §1.2.
+9. **Every feature exists on both interfaces — Django Admin and API/Views/Endpoints — or it's a
+   defect, in either direction.** This is a general project convention (mirrored in
+   `../django-jwt-multiauth/docs/CONTRACT.md` §11 item 18, and recorded as the reason the v1.1.0
+   release exists at all), not something scoped only to admin/user-management features. When
+   adding a capability reachable through one surface, ask whether the other needs it too before
+   calling the work done — the answer is usually yes; the deliberate exceptions (e.g.
+   `POST /deletion-requests/{id}/finalize/` bypassing the grace period, which has no Django-Admin
+   action) are documented as such in `docs/CONTRACT.md`, not left as silent gaps.
 
 ## Scope boundary
 
@@ -138,8 +146,9 @@ shared workflow).
 ## Semver triggers — MAJOR bumps even when the diff is small
 
 - Removing/renaming a signal (`profile_created`, `setting_created`, `deletion_requested`,
-  `deletion_reviewed`, `deletion_finalized`, `profile_updated`), a `services.py` method signature,
-  an exported hook, or a field a host might query on `User`/`Profile`/`Setting`/
+  `deletion_reviewed`, `deletion_finalized`, `profile_updated`, `user_created`, `user_updated`,
+  `setting_updated`, `user_deleted`, `user_password_set`), a `services.py` method signature, an
+  exported hook, or a field a host might query on `User`/`Profile`/`Setting`/
   `AccountDeletionRequest`.
 - Renaming a `DYNAMIC_USER` settings key, or either of the two top-level swappable-model settings
   (`DYNAMIC_USER_PROFILE_MODEL`, `DYNAMIC_USER_SETTING_MODEL`).

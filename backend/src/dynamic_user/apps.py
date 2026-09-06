@@ -29,13 +29,17 @@ class DynamicUserConfig(AppConfig):
         first, since they are what surfaces a misconfiguration in the first place; the
         auto-provisioning receivers are wired second and only under their own guard, since a
         host that has disabled one or both should see zero side effects from this app beyond
-        the check itself.
+        the check itself; ``user_created`` (v1.1.0) is connected last and unconditionally, so that
+        by the time it fires, Profile/Setting provisioning (if enabled) has already run — see
+        ``signals.connect_user_created``'s own docstring for why connection order is what
+        guarantees this, not a coincidence of this file's read-top-to-bottom layout.
         """
         from django.core.checks import register
 
         from dynamic_user import checks, conf, signals
 
         register(checks.check_swappable_model_settings)
+        register(checks.check_model_subclasses)
         register(checks.check_deletion_settings)
         register(checks.check_field_allowlists)
 
@@ -44,3 +48,5 @@ class DynamicUserConfig(AppConfig):
 
         if conf.get_setting("AUTO_CREATE_SETTING"):
             signals.connect_setting_auto_provisioning()
+
+        signals.connect_user_created()

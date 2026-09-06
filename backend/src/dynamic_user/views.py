@@ -17,13 +17,15 @@ silently break both the swapped settings leg and every ``override_settings`` tes
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from appkit.mixins import CachedListMixin
 from appkit.pagination import DefaultPagination
+from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import generics, status
 from rest_framework.exceptions import APIException, NotFound
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -38,6 +40,7 @@ from dynamic_user.services import (
     InvalidDeletionState,
     ProfileService,
     SettingService,
+    UserService,
 )
 
 __all__ = [
@@ -48,6 +51,7 @@ __all__ = [
     "MySettingView",
     "PublicProfileDetailView",
     "PublicProfileListView",
+    "reraise_as_drf_validation_error",
 ]
 
 
@@ -63,6 +67,21 @@ class DeletionRequestConflict(APIException):
     default_code = "error"
 
 
+def reraise_as_drf_validation_error(exc: DjangoValidationError) -> NoReturn:
+    """v1.1.0. Translates a :exc:`django.core.exceptions.ValidationError` — raised by
+    :meth:`~dynamic_user.models.AbstractDynamicUser.save` (the email-or-phone identity rule, or a
+    configured ``PHONE_VALIDATORS``/``NAME_VALIDATORS`` failure) reached through
+    :class:`~dynamic_user.services.UserService` — into DRF's own
+    :exc:`~rest_framework.exceptions.ValidationError`, which appkit's exception handler already
+    renders as a clean ``400`` through the standard error envelope. Without this, the Django
+    exception propagates unhandled and appkit's handler falls back to its generic ``500`` path —
+    correct for a genuinely unexpected error, but this one is a validation failure a caller can
+    fix by changing their request body, not a server fault."""
+    if hasattr(exc, "message_dict"):
+        raise DRFValidationError(exc.message_dict) from exc
+    raise DRFValidationError(exc.messages) from exc
+
+
 @extend_schema_view(
     # Keyed by HTTP method, not a ViewSet's `.action` — a plain GenericAPIView has none, so
     # AutoSchema falls back to `self.method.lower()` (verified against cleanup_app's own
@@ -75,21 +94,51 @@ class DeletionRequestConflict(APIException):
         ),
         responses=serializers.get_user_read_serializer(),
         tags=["dynamic-user"],
-    )
+    ),
+    patch=extend_schema(
+        summary="Update my account info",
+        description=(
+            "v1.1.0. USER_SELF_EDITABLE_FIELDS minus USER_LOCKED_FIELDS, applied via "
+            "UserService.update — deliberately name-only by default; see "
+            "get_user_self_editable_serializer()'s own docstring for why."
+        ),
+        request=serializers.get_user_self_editable_serializer(),
+        responses=serializers.get_user_read_serializer(),
+        tags=["dynamic-user"],
+    ),
 )
-class MeView(generics.RetrieveAPIView[Any]):
-    """``GET /me/``. No PATCH exists here at all — ``USER_EDITABLE_FIELDS`` has no wired route on
-    this surface yet (``docs/CONTRACT.md`` §5); PUT/PATCH/DELETE all 405 since ``RetrieveAPIView``
-    defines no handler for them."""
+class MeView(generics.RetrieveUpdateAPIView[Any]):
+    """``GET``/``PATCH`` ``/me/``. ``PUT`` is deliberately unavailable — same reasoning as
+    ``MyProfileView``: ``docs/CONTRACT.md`` §5 lists no full-replace route here either."""
 
     permission_classes = [IsAuthenticated]  # noqa: RUF012 -- APIView types this as an instance var
+    http_method_names = ["get", "patch", "head", "options"]  # noqa: RUF012
     throttle_scope = "dynamic_user_me"
 
     def get_serializer_class(self) -> type[Any]:
+        if self.request.method == "PATCH":
+            return serializers.get_user_self_editable_serializer()
         return serializers.get_user_read_serializer()
+
+    def get_throttles(self) -> list[Any]:
+        if self.request.method == "PATCH":
+            self.throttle_scope = "dynamic_user_me_update"
+        return super().get_throttles()
 
     def get_object(self) -> Any:
         return cast(Any, self.request.user)
+
+    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        try:
+            updated = UserService.update(cast(Any, request.user), serializer.validated_data)
+        except DjangoValidationError as exc:
+            reraise_as_drf_validation_error(exc)
+        read_serializer = serializers.get_user_read_serializer()(updated)
+        return Response(read_serializer.data)
 
 
 @extend_schema_view(

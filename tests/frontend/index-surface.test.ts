@@ -8,10 +8,11 @@ import * as mod from "../../frontend/src/index.js";
  * regression here means an internal implementation detail leaked into the published package.
  */
 describe("frontend/src/index.ts public surface", () => {
-  it("exports exactly the 20 hooks plus both key factories, nothing else", () => {
+  it("exports exactly the 46 hooks plus both key factories, nothing else", () => {
     const expected = [
       // self-service hooks
       "useMe",
+      "useUpdateMe",
       "useMyProfile",
       "useUpdateMyProfile",
       "useMySetting",
@@ -23,15 +24,40 @@ describe("frontend/src/index.ts public surface", () => {
       "useCancelDeletionRequest",
       // admin hooks
       "useAdminUsers",
+      "useCreateAdminUser",
       "useAdminUser",
       "useUpdateAdminUser",
+      "useDeleteAdminUser",
+      "useSetAdminUserPassword",
       "useAdminUserProfile",
       "useUpdateAdminUserProfile",
       "useAdminUserSetting",
       "useUpdateAdminUserSetting",
+      "useAdminProfiles",
+      "useCreateAdminProfile",
+      "useAdminProfile",
+      "useUpdateAdminProfileById",
+      "useDeleteAdminProfile",
+      "useAdminSettings",
+      "useCreateAdminSetting",
+      "useAdminSetting",
+      "useUpdateAdminSettingById",
+      "useDeleteAdminSetting",
       "useAdminDeletionRequests",
+      "useAdminDeletionRequest",
+      "useCreateAdminDeletionRequest",
+      "useCancelAdminDeletionRequest",
       "useReviewDeletionRequest",
       "useFinalizeDeletionRequest",
+      "useAdminChangeLog",
+      "useAdminChangeLogEntry",
+      "useDeleteAdminChangeLogEntry",
+      "useAdminLogEntries",
+      "useAdminLogEntry",
+      "useDeleteAdminLogEntry",
+      "useAdminGroups",
+      "useAdminGroup",
+      "useAdminPermissions",
       // key factories
       "dynamicUserKeys",
       "dynamicUserAdminKeys",

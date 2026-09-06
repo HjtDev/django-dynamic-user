@@ -23,9 +23,13 @@ def test_create_user_sets_expected_defaults() -> None:
     assert user.check_password("pw")
 
 
-def test_create_user_requires_username() -> None:
-    with pytest.raises(ValueError, match="username"):
-        get_user_model().objects.create_user(username="", email="x@example.com", password="pw")
+def test_create_user_without_username_generates_one() -> None:
+    """v1.1.0: a missing username no longer raises — it's the OTP/OAuth registration shape
+    (docs/CONTRACT.md §1), where a username is never known at creation time. See
+    test_identity.py for the full generation/uniqueness/opt-out matrix."""
+    user = get_user_model().objects.create_user(email="x@example.com", password="pw")
+    assert user.username
+    assert user.username.startswith("user_")
 
 
 def test_create_superuser_sets_staff_and_superuser() -> None:

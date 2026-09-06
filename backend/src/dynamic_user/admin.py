@@ -39,6 +39,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from django.contrib import admin, messages
+from django.contrib.admin.models import LogEntry
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.base_user import AbstractBaseUser
@@ -82,6 +83,7 @@ if TYPE_CHECKING:
     _SettingAdminBase = admin.ModelAdmin[AbstractSetting]
     _DeletionRequestAdminBase = admin.ModelAdmin[AccountDeletionRequest]
     _ChangeLogEntryAdminBase = admin.ModelAdmin[ChangeLogEntry]
+    _LogEntryAdminBase = admin.ModelAdmin[LogEntry]
 else:
     _UserChangeFormBase = DjangoUserChangeForm
     _UserCreationFormBase = DjangoAdminUserCreationForm
@@ -90,6 +92,7 @@ else:
     _SettingAdminBase = admin.ModelAdmin
     _DeletionRequestAdminBase = admin.ModelAdmin
     _ChangeLogEntryAdminBase = admin.ModelAdmin
+    _LogEntryAdminBase = admin.ModelAdmin
 
 
 class UserChangeForm(_UserChangeFormBase):
@@ -195,6 +198,49 @@ def reject_selected(
     _review_selected(request, queryset, approved=False)
 
 
+@admin.action(description=_("Finalize selected deletion requests now (superuser only)"))
+def finalize_selected(
+    modeladmin: AccountDeletionRequestAdmin,
+    request: HttpRequest,
+    queryset: QuerySet[AccountDeletionRequest],
+) -> None:
+    """v1.1.0. Calls ``DeletionService.finalize`` per selected row, bypassing ``finalize_at`` —
+    closes the one gap that used to run **API → admin only**: ``POST
+    /deletion-requests/{id}/finalize/`` has existed since Phase 6, with no Django Admin
+    equivalent until now. Superuser-only, always, matching that endpoint's own floor — checked
+    here explicitly rather than via ``has_delete_permission``-style gating, since a *staff* admin
+    is meant to see this action listed (so its absence isn't itself informative) but get an
+    explicit, per-row error rather than the action silently not appearing at all."""
+    if not request.user.is_superuser:
+        messages.error(request, _("Only a superuser may finalize a deletion request early."))
+        return
+
+    finalized, skipped = 0, 0
+    for deletion_request in queryset:
+        try:
+            DeletionService.finalize(deletion_request.pk)
+        except InvalidDeletionState as exc:
+            skipped += 1
+            messages.error(request, str(exc))
+        else:
+            finalized += 1
+
+    if finalized:
+        text = ngettext(
+            "%(count)d deletion request finalized.",
+            "%(count)d deletion requests finalized.",
+            finalized,
+        )
+        messages.success(request, text % {"count": finalized})
+    if skipped:
+        text = ngettext(
+            "%(count)d deletion request skipped — see errors above.",
+            "%(count)d deletion requests skipped — see errors above.",
+            skipped,
+        )
+        messages.warning(request, text % {"count": skipped})
+
+
 def _review_selected(
     request: HttpRequest, queryset: QuerySet[AccountDeletionRequest], *, approved: bool
 ) -> None:
@@ -243,12 +289,30 @@ def _review_selected(
 class AccountDeletionRequestAdmin(_DeletionRequestAdminBase):
     list_display = ("user", "status", "requested_at", "finalize_at", "reviewed_by")
     list_filter = ("status",)
-    readonly_fields = ("requested_at", "reviewed_at")
+    # v1.1.0: status/user/reviewed_by/finalize_at moved to readonly_fields — a staff user could
+    # previously set status="approved" by hand on the change form, or move finalize_at, entirely
+    # bypassing DeletionService's state machine (and the deletion_requested/deletion_reviewed
+    # signals a real transition fires). Every state change now goes through the actions below or
+    # the admin API, both of which call DeletionService — never a raw form save.
+    readonly_fields = (
+        "user",
+        "status",
+        "requested_at",
+        "reviewed_at",
+        "reviewed_by",
+        "finalize_at",
+    )
     search_fields = ("user__username", "user__email")
-    actions = (approve_selected, reject_selected)
+    actions = (approve_selected, reject_selected, finalize_selected)
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[AccountDeletionRequest]:
         return super().get_queryset(request).select_related("user", "reviewed_by")
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        # v1.1.0: creating one bypasses DeletionService.request's duplicate guard, finalize_at
+        # computation, and deletion_requested signal — use the admin API's POST
+        # /deletion-requests/ or a real user's own POST /me/deletion-request/ instead.
+        return False
 
 
 @admin.register(ChangeLogEntry)
@@ -271,3 +335,54 @@ class ChangeLogEntryAdmin(_ChangeLogEntryAdminBase):
     def has_add_permission(self, request: HttpRequest) -> bool:
         # Change-log rows are written only by HistoryMixin.log_change() — never hand-created.
         return False
+
+    def has_change_permission(
+        self, request: HttpRequest, obj: ChangeLogEntry | None = None
+    ) -> bool:
+        # v1.1.0: every field was already readonly_fields, so this was already a no-op change
+        # form in practice — made explicit rather than implicit, matching the admin API's own
+        # read-only AdminChangeLogEntrySerializer.
+        return False
+
+    def has_delete_permission(
+        self, request: HttpRequest, obj: ChangeLogEntry | None = None
+    ) -> bool:
+        # v1.1.0: an audit row deleted by anything less than an actual superuser is exactly the
+        # tampering an audit trail exists to make visible — matches the admin API's own
+        # DELETE /change-log/{id}/ gate (IsSuperUser).
+        return bool(request.user.is_superuser)
+
+
+@admin.register(LogEntry)
+class LogEntryAdmin(_LogEntryAdminBase):
+    """v1.1.0. Django's own admin-action audit trail — ``LogEntry`` is not registered by
+    ``django.contrib.admin`` itself by default, so a host previously had no admin-UI way to
+    browse it at all despite Django writing a row for every admin add/change/delete
+    automatically. Read-only, plus a superuser-only delete — matches the admin API's own
+    ``GET``/``DELETE`` ``/log-entries/{id}/`` gate exactly (no ``PATCH``, no ``POST`` on either
+    surface — an audit row is never edited or hand-created)."""
+
+    list_display = ("action_time", "user", "content_type", "object_repr", "action_flag")
+    list_filter = ("action_flag", "content_type")
+    search_fields = ("object_repr", "user__username")
+    readonly_fields = (
+        "action_time",
+        "user",
+        "content_type",
+        "object_id",
+        "object_repr",
+        "action_flag",
+        "change_message",
+    )
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[LogEntry]:
+        return super().get_queryset(request).select_related("user", "content_type")
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: LogEntry | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: LogEntry | None = None) -> bool:
+        return bool(request.user.is_superuser)

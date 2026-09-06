@@ -1,12 +1,22 @@
 import type {
+  AdminChangeLogEntry,
   AdminDeletionRequest,
+  AdminGroup,
+  AdminLogEntry,
+  AdminPermission,
   AdminProfile,
   AdminSetting,
   AdminUser,
   DeletionRequest,
   MyProfile,
   MySetting,
+  PaginatedAdminChangeLogEntryList,
   PaginatedAdminDeletionRequestList,
+  PaginatedAdminGroupList,
+  PaginatedAdminLogEntryList,
+  PaginatedAdminPermissionList,
+  PaginatedAdminProfileList,
+  PaginatedAdminSettingList,
   PaginatedAdminUserList,
   PaginatedPublicProfileList,
   PublicProfile,
@@ -162,6 +172,129 @@ export function makePaginatedAdminDeletionRequestList(
     next: null,
     previous: null,
     results: [makeAdminDeletionRequest()],
+    ...overrides,
+  };
+}
+
+// --- v1.1.0: admin parity additions ---------------------------------------------------------
+
+export function makePaginatedAdminProfileList(
+  overrides: Partial<PaginatedAdminProfileList> = {},
+): PaginatedAdminProfileList {
+  return {
+    count: 1,
+    next: null,
+    previous: null,
+    results: [makeAdminProfile()],
+    ...overrides,
+  };
+}
+
+export function makePaginatedAdminSettingList(
+  overrides: Partial<PaginatedAdminSettingList> = {},
+): PaginatedAdminSettingList {
+  return {
+    count: 1,
+    next: null,
+    previous: null,
+    results: [makeAdminSetting()],
+    ...overrides,
+  };
+}
+
+export function makeAdminChangeLogEntry(
+  overrides: Partial<AdminChangeLogEntry> = {},
+): AdminChangeLogEntry {
+  return {
+    id: 1,
+    content_type: 1,
+    object_id: 1,
+    actor: 1,
+    field_name: "name",
+    old_value: "",
+    new_value: "Alice",
+    changed_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makePaginatedAdminChangeLogEntryList(
+  overrides: Partial<PaginatedAdminChangeLogEntryList> = {},
+): PaginatedAdminChangeLogEntryList {
+  return {
+    count: 1,
+    next: null,
+    previous: null,
+    results: [makeAdminChangeLogEntry()],
+    ...overrides,
+  };
+}
+
+export function makeAdminLogEntry(overrides: Partial<AdminLogEntry> = {}): AdminLogEntry {
+  return {
+    id: 1,
+    action_time: "2026-01-01T00:00:00Z",
+    user: 1,
+    content_type: 1,
+    object_id: "1",
+    object_repr: "alice",
+    action_flag: 2,
+    change_message: "Changed name.",
+    ...overrides,
+  };
+}
+
+export function makePaginatedAdminLogEntryList(
+  overrides: Partial<PaginatedAdminLogEntryList> = {},
+): PaginatedAdminLogEntryList {
+  return {
+    count: 1,
+    next: null,
+    previous: null,
+    results: [makeAdminLogEntry()],
+    ...overrides,
+  };
+}
+
+export function makeAdminGroup(overrides: Partial<AdminGroup> = {}): AdminGroup {
+  return {
+    id: 1,
+    name: "editors",
+    permissions: [],
+    ...overrides,
+  };
+}
+
+export function makePaginatedAdminGroupList(
+  overrides: Partial<PaginatedAdminGroupList> = {},
+): PaginatedAdminGroupList {
+  return {
+    count: 1,
+    next: null,
+    previous: null,
+    results: [makeAdminGroup()],
+    ...overrides,
+  };
+}
+
+export function makeAdminPermission(overrides: Partial<AdminPermission> = {}): AdminPermission {
+  return {
+    id: 1,
+    name: "Can add user",
+    codename: "add_user",
+    content_type: 1,
+    ...overrides,
+  };
+}
+
+export function makePaginatedAdminPermissionList(
+  overrides: Partial<PaginatedAdminPermissionList> = {},
+): PaginatedAdminPermissionList {
+  return {
+    count: 1,
+    next: null,
+    previous: null,
+    results: [makeAdminPermission()],
     ...overrides,
   };
 }

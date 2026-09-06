@@ -26,7 +26,9 @@ import logging
 from datetime import timedelta
 from typing import Any, cast
 
+from django.contrib.auth import get_user_model
 from django.contrib.auth.base_user import AbstractBaseUser
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 from django.utils.module_loading import import_string
@@ -43,8 +45,86 @@ class DeletionRequestAlreadyExists(Exception):
 
 
 class InvalidDeletionState(Exception):
-    """Raised by ``DeletionService.review()``/``.finalize()``/``.cancel()`` when called against a
-    request not in the required status. Views map this to HTTP 409 (``docs/CONTRACT.md`` §5)."""
+    """Raised by ``DeletionService.review()``/``.finalize()``/``.cancel()``/``.cancel_by_id()``
+    when called against a request not in the required status. Views map this to HTTP 409
+    (``docs/CONTRACT.md`` §5)."""
+
+
+class UserService:
+    """v1.1.0. The only place a user create/update/delete/password-set happens outside
+    :class:`~dynamic_user.managers.UserManager` itself (``create``) or Django's own admin forms.
+    Every method resolves the user model through ``django.contrib.auth.get_user_model()`` — never
+    a concrete import — mirroring every other service in this module. None of the
+    privilege-escalation guarding lives here: that is a view-layer concern
+    (``permissions.CanEscalatePrivilege``/``IsSuperUser``), enforced *before* a view ever calls
+    into this service, exactly like the existing admin ``PATCH /{id}/`` route already does through
+    its serializer.
+    """
+
+    @staticmethod
+    def create(*, password: str | None = None, **fields: Any) -> AbstractBaseUser:
+        """Creates a user via ``UserManager.create_user`` — the one call site that keeps identity
+        validation and username generation happening exactly once, inside
+        :meth:`~dynamic_user.models.AbstractDynamicUser.save`. ``fields`` is whatever the caller
+        resolved (e.g. an admin create serializer's ``validated_data``) — ``username``/``email``
+        are both optional keys within it, per this app's v1.1.0 identity rule."""
+        model = get_user_model()
+        user = cast(Any, model)._default_manager.create_user(password=password, **fields)
+        return cast(AbstractBaseUser, user)
+
+    @staticmethod
+    def update(
+        user: AbstractBaseUser,
+        validated_data: dict[str, Any],
+        *,
+        actor: AbstractBaseUser | None = None,
+    ) -> AbstractBaseUser:
+        """Writes ``validated_data`` onto ``user``, sends ``user_updated`` with ``changed_fields``
+        if anything actually changed — the same diff-and-signal shape as
+        :meth:`ProfileService.update`. ``actor`` is accepted for symmetry with
+        :meth:`delete`/:meth:`set_password` but not currently part of ``user_updated``'s payload
+        (``docs/CONTRACT.md`` §3) — kept as a keyword-only parameter so a future payload addition
+        doesn't need a signature change."""
+        changed_fields: list[str] = []
+        for field, value in validated_data.items():
+            if getattr(user, field) != value:
+                setattr(user, field, value)
+                changed_fields.append(field)
+
+        if changed_fields:
+            user.save(update_fields=changed_fields)
+            signals.user_updated.send(
+                sender=type(user), user_id=user.pk, changed_fields=changed_fields
+            )
+
+        return user
+
+    @staticmethod
+    def set_password(
+        user: AbstractBaseUser, raw_password: str, *, actor: AbstractBaseUser | None = None
+    ) -> None:
+        """Validates ``raw_password`` against ``AUTH_PASSWORD_VALIDATORS`` (Django's own setting
+        — this app defines no opinionated password policy of its own, matching this repo's scope
+        boundary for validators), sets it, and sends ``user_password_set`` — carrying no password
+        material, only who and whom, so a host or a separate auth-app package can revoke every
+        existing session for this user."""
+        validate_password(raw_password, user=cast(Any, user))
+        user.set_password(raw_password)
+        user.save(update_fields=["password"])
+        signals.user_password_set.send(
+            sender=type(user), user_id=user.pk, actor_id=actor.pk if actor is not None else None
+        )
+
+    @staticmethod
+    def delete(user: AbstractBaseUser, *, actor: AbstractBaseUser | None = None) -> None:
+        """Deletes ``user`` outright and sends ``user_deleted``, ``user_id`` captured before the
+        delete — the same reasoning as ``DeletionService.finalize``'s own ``user_id`` capture:
+        after the delete there is no row left to read it from."""
+        user_id = user.pk
+        user.delete()
+        signals.user_deleted.send(
+            sender=type(user), user_id=user_id, actor_id=actor.pk if actor is not None else None
+        )
 
 
 class ProfileService:
@@ -83,9 +163,10 @@ class ProfileService:
 class SettingService:
     @staticmethod
     def update(user: AbstractBaseUser, validated_data: dict[str, Any]) -> AbstractSetting:
-        """Writes ``validated_data`` onto ``user``'s Setting (``get_setting_model()``). No
-        signal — Setting changes are not currently part of the versioned-contract surface
-        (``docs/CONTRACT.md`` §11 open item).
+        """Writes ``validated_data`` onto ``user``'s Setting (``get_setting_model()``), sends
+        ``setting_updated`` with ``changed_fields`` if anything actually changed — v1.1.0 closes
+        the asymmetry with :meth:`ProfileService.update` that ``docs/CONTRACT.md`` §11 had left
+        as an open item. Additive: no existing receiver relied on Setting changes staying silent.
 
         Same ``get_or_create`` reasoning as :meth:`ProfileService.update`.
         """
@@ -100,6 +181,9 @@ class SettingService:
 
         if changed_fields:
             setting.save(update_fields=changed_fields)
+            signals.setting_updated.send(
+                sender=model, user_id=user.pk, changed_fields=changed_fields
+            )
 
         return cast(AbstractSetting, setting)
 
@@ -276,4 +360,32 @@ class DeletionService:
         ).first()
         if deletion_request is None:
             raise InvalidDeletionState(f"User {user.pk} has no pending deletion request to cancel.")
+        deletion_request.delete()
+
+    @staticmethod
+    def cancel_by_id(request_id: int) -> None:
+        """v1.1.0. Admin-side cancel — same no-dedicated-status reasoning as :meth:`cancel`, but
+        reached by request id rather than only the current user's own row, since an admin cancels
+        on someone else's behalf. Accepts a request currently ``PENDING`` *or* ``APPROVED`` —
+        unlike :meth:`cancel`, which only ever sees the caller's own current (therefore
+        ``PENDING``-only, per :meth:`current`) request — because an admin reasonably wants to
+        withdraw a request they already approved but haven't finalized yet. Raises
+        ``InvalidDeletionState`` if the request doesn't exist or is already ``REJECTED``/
+        ``FINALIZED``."""
+        try:
+            deletion_request = AccountDeletionRequest.objects.get(pk=request_id)
+        except AccountDeletionRequest.DoesNotExist as exc:
+            raise InvalidDeletionState(
+                f"AccountDeletionRequest {request_id} does not exist."
+            ) from exc
+
+        cancellable = (
+            AccountDeletionRequest.Status.PENDING,
+            AccountDeletionRequest.Status.APPROVED,
+        )
+        if deletion_request.status not in cancellable:
+            raise InvalidDeletionState(
+                f"AccountDeletionRequest {request_id} is '{deletion_request.status}', "
+                "not 'pending' or 'approved' — it cannot be cancelled."
+            )
         deletion_request.delete()

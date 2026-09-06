@@ -23,7 +23,7 @@ uv add "django-dynamic-user>=1.0,<2.0"
 Pinning an unreleased commit instead of a tagged release works too, via the git+subdirectory form:
 
 ```bash
-uv add "git+https://github.com/HjtDev/django-dynamic-user.git@v1.0.0#subdirectory=backend"
+uv add "git+https://github.com/HjtDev/django-dynamic-user.git@v1.1.0#subdirectory=backend"
 ```
 
 Optional extras:
@@ -42,6 +42,12 @@ schedule" and the `AvatarMixin` row of the mixins table below.
 - `hjtdev-appkit>=2.0,<3.0` — a declared dependency, not optional.
 - Requires `django.contrib.contenttypes` (present by default with the admin) — the one place this
   app touches it is `ChangeLogEntry`, the concrete model behind `HistoryMixin.log_change()`.
+- **OTP/OAuth-style authentication apps (v1.1.0).** A separate auth app can create a user knowing
+  only a phone number or only an email — `email`/`phone` are both optional (at least one is
+  required), `username` auto-generates when omitted, and Profile/Setting auto-provision
+  regardless of which code path created the user. This works even for an auth app that writes
+  fields directly and calls plain `.save()`, bypassing `UserManager` entirely — see "Migrations"
+  and the `USERNAME_*`/`USER_SELF_EDITABLE_FIELDS` settings below.
 
 ## The two swappable-model settings
 
@@ -170,6 +176,7 @@ MIDDLEWARE += []  # none required
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({
     "dynamic_user_me": "60/min",
+    "dynamic_user_me_update": "20/min",
     "dynamic_user_profile_update": "20/min",
     "dynamic_user_setting_update": "20/min",
     "dynamic_user_profiles_list": "60/min",
@@ -178,11 +185,30 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({
     "dynamic_user_admin_users_list": "60/min",
     "dynamic_user_admin_user_retrieve": "60/min",
     "dynamic_user_admin_user_update": "30/min",
+    "dynamic_user_admin_user_create": "20/min",
+    "dynamic_user_admin_user_delete": "10/min",
+    "dynamic_user_admin_user_set_password": "10/min",
     "dynamic_user_admin_profile_update": "30/min",
     "dynamic_user_admin_setting_update": "30/min",
     "dynamic_user_admin_deletions_list": "60/min",
     "dynamic_user_admin_deletion_review": "20/min",
     "dynamic_user_admin_deletion_finalize": "10/min",
+    "dynamic_user_admin_profiles_list": "60/min",
+    "dynamic_user_admin_profile_create": "20/min",
+    "dynamic_user_admin_profile_detail": "60/min",
+    "dynamic_user_admin_settings_list": "60/min",
+    "dynamic_user_admin_setting_create": "20/min",
+    "dynamic_user_admin_setting_detail": "60/min",
+    "dynamic_user_admin_deletion_request_detail": "60/min",
+    "dynamic_user_admin_deletion_request_create": "20/min",
+    "dynamic_user_admin_deletion_request_cancel": "20/min",
+    "dynamic_user_admin_change_log_list": "60/min",
+    "dynamic_user_admin_change_log_detail": "60/min",
+    "dynamic_user_admin_log_entries_list": "60/min",
+    "dynamic_user_admin_log_entry_detail": "60/min",
+    "dynamic_user_admin_groups_list": "60/min",
+    "dynamic_user_admin_group_detail": "60/min",
+    "dynamic_user_admin_permissions_list": "60/min",
 })
 
 # The package's own concrete models, used as-is. Every DYNAMIC_USER key below is optional with a
@@ -201,7 +227,7 @@ per host, just keep every scope name exact (they're literal strings, not derived
 
 ### `DYNAMIC_USER` settings — every key, with its default
 
-All 20 keys are optional at the Python level; a host overrides only what it needs to change.
+All 24 keys are optional at the Python level; a host overrides only what it needs to change.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -225,6 +251,10 @@ All 20 keys are optional at the Python level; a host overrides only what it need
 | `DELETION_ANONYMIZE_FUNCTION` | `None` | Dotted path to a callable `(user) -> None`, called by `.finalize()` when `DELETION_MODE="anonymize"`. Required in that mode — fails closed (`ImproperlyConfigured`) rather than silently falling back to hard-delete |
 | `DELETION_HISTORY_RETENTION_DAYS` | `90` | Default window `tasks.purge_deletion_history` uses when not passed an explicit `older_than_days` |
 | `LAST_SEEN_UPDATE_SECONDS` | `300` | Minimum interval `LastSeenMixin`'s update path (a host-wired hook, not a view this package ships) writes a new `last_seen_at` |
+| `USER_SELF_EDITABLE_FIELDS` | `["name"]` | **v1.1.0.** Fields `PATCH /me/` accepts (minus `USER_LOCKED_FIELDS`). Separate from `USER_EDITABLE_FIELDS` on purpose — that key's default includes `phone`, which a self-service caller shouldn't be able to rewrite unverified on a host using phone as a login identifier. Add `"phone"` here if your host wants that |
+| `USERNAME_AUTO_GENERATE` | `True` | **v1.1.0.** `False` makes a missing `username` at save time raise instead of auto-generating one |
+| `USERNAME_GENERATOR` | `None` | **v1.1.0.** Dotted path to `(model) -> str`. Unset uses the built-in generator: `USERNAME_PREFIX` + 16 hex chars of `secrets` randomness |
+| `USERNAME_PREFIX` | `"user_"` | **v1.1.0.** Prefix for the built-in generator only |
 
 A settings change never produces a migration diff — every one of these is resolved at call time,
 never baked into a model's class attributes. The one exception, forced by Django itself, is
@@ -240,7 +270,7 @@ is a named startup error, never a mid-request crash and never a silent drop:
 | `dynamic_user.E001` | `DYNAMIC_USER_PROFILE_MODEL`/`DYNAMIC_USER_SETTING_MODEL` not shaped `"app_label.ModelName"` |
 | `dynamic_user.E002` | One of those settings names a model that isn't installed |
 | `dynamic_user.E003` | `DELETION_MODE` is neither `"hard_delete"` nor `"anonymize"`, or it's `"anonymize"` with no `DELETION_ANONYMIZE_FUNCTION` set |
-| `dynamic_user.E004` | The resolved `AUTH_USER_MODEL`/`DYNAMIC_USER_PROFILE_MODEL`/`DYNAMIC_USER_SETTING_MODEL` does not subclass this app's corresponding abstract base |
+| `dynamic_user.E004` | The resolved `DYNAMIC_USER_PROFILE_MODEL`/`DYNAMIC_USER_SETTING_MODEL` does not subclass this app's `AbstractProfile`/`AbstractSetting` |
 | `dynamic_user.E005` | A name in any `*_FIELDS` allowlist (including `USER_PRIVILEGED_FIELDS`) that doesn't exist on the resolved model |
 
 ## Required `.env` keys
@@ -277,6 +307,22 @@ app instead — `dynamic_user`'s own migrations only apply when its concrete `Us
 `Setting` are actually in use. `ChangeLogEntry` (the model behind `HistoryMixin`) is not
 swappable and always migrates with `dynamic_user` regardless.
 
+**Upgrading to v1.1.0.** `migrate` picks up `0002_optional_identity` automatically (widens
+`email`/`username`, adds the email-or-phone `CheckConstraint`) — no data migration is needed,
+since every pre-existing row already has a non-null `email`. If you subclassed
+`AbstractDynamicUser`, run `makemigrations` once for your own app first (the constraint is
+inherited from the abstract base). Then, once, backfill any Profile/Setting rows that predate
+this install or an `AUTO_CREATE_PROFILE`/`AUTO_CREATE_SETTING=False` period:
+
+```bash
+uv run python manage.py backfill_user_relations --dry-run   # see counts first
+uv run python manage.py backfill_user_relations
+```
+
+Idempotent — safe to run more than once. `--no-signals` suppresses `profile_created`/
+`setting_created` for the backfilled rows, useful if a receiver (e.g. a welcome email) shouldn't
+fire for a bulk backfill.
+
 ## Verifying the install
 
 ```bash
@@ -310,11 +356,12 @@ Every object here is resolved from `request.user`, never a URL-supplied id, exce
 | `GET` | `/profiles/` | `IsAuthenticated` | `dynamic_user_profiles_list` |
 | `GET` | `/profiles/{id}/` | `IsAuthenticated`, `IsPublicOrOwner` | `dynamic_user_profile_retrieve` |
 | `POST` `GET` `DELETE` | `/me/deletion-request/` | `IsAuthenticated` | `dynamic_user_deletion_request` |
+| `PATCH` | `/me/` | `IsAuthenticated` | `dynamic_user_me_update` |
 
 `GET /profiles/{id}/`'s `{id}` is the target **user's** id, not the Profile row's own primary key.
 A private profile 404s (not 403) for a non-owner. `POST /me/deletion-request/` 409s if a
 pending/approved request already exists; `DELETE` 409s if the caller's current request isn't
-`PENDING`.
+`PENDING`. **v1.1.0:** `PATCH /me/` writes `USER_SELF_EDITABLE_FIELDS` (default: just `name`).
 
 ### Admin — `dynamic_user.urls_admin`, basePath `/api/v1/admin/users`
 
@@ -324,13 +371,39 @@ Every view is gated by `IsDynamicUserAdmin` (`is_staff`, or `is_superuser` when
 | Method | Path | Extra gate | Throttle scope |
 |---|---|---|---|
 | `GET` | `/` | — | `dynamic_user_admin_users_list` |
+| `POST` | `/` | `CanEscalatePrivilege` | `dynamic_user_admin_user_create` |
 | `GET` | `/{id}/` | — | `dynamic_user_admin_user_retrieve` |
 | `PATCH` | `/{id}/` | `CanEscalatePrivilege` | `dynamic_user_admin_user_update` |
+| `DELETE` | `/{id}/` | **superuser-only, always** | `dynamic_user_admin_user_delete` |
+| `POST` | `/{id}/set-password/` | **superuser-only, always** | `dynamic_user_admin_user_set_password` |
 | `GET` `PATCH` | `/{id}/profile/` | — | `dynamic_user_admin_profile_update` |
 | `GET` `PATCH` | `/{id}/setting/` | — | `dynamic_user_admin_setting_update` |
+| `GET` `POST` | `/profiles/` | — | `dynamic_user_admin_profiles_list` / `dynamic_user_admin_profile_create` |
+| `GET` `PATCH` `DELETE` | `/profiles/{profile_id}/` | — | `dynamic_user_admin_profile_detail` |
+| `GET` `POST` | `/settings/` | — | `dynamic_user_admin_settings_list` / `dynamic_user_admin_setting_create` |
+| `GET` `PATCH` `DELETE` | `/settings/{setting_id}/` | — | `dynamic_user_admin_setting_detail` |
 | `GET` | `/deletion-requests/` | — | `dynamic_user_admin_deletions_list` |
+| `POST` | `/deletion-requests/` | — | `dynamic_user_admin_deletion_request_create` |
+| `GET` | `/deletion-requests/{id}/` | — | `dynamic_user_admin_deletion_request_detail` |
+| `DELETE` | `/deletion-requests/{id}/` | — | `dynamic_user_admin_deletion_request_cancel` |
 | `POST` | `/deletion-requests/{id}/review/` | — | `dynamic_user_admin_deletion_review` |
 | `POST` | `/deletion-requests/{id}/finalize/` | **superuser-only, always** | `dynamic_user_admin_deletion_finalize` |
+| `GET` | `/change-log/` | — | `dynamic_user_admin_change_log_list` |
+| `GET` `DELETE` | `/change-log/{id}/` | `DELETE`: **superuser-only, always** | `dynamic_user_admin_change_log_detail` |
+| `GET` | `/log-entries/` | — (only wired if `django.contrib.admin` is installed) | `dynamic_user_admin_log_entries_list` |
+| `GET` `DELETE` | `/log-entries/{id}/` | `DELETE`: **superuser-only, always** | `dynamic_user_admin_log_entry_detail` |
+| `GET` | `/groups/` | — | `dynamic_user_admin_groups_list` |
+| `GET` | `/groups/{id}/` | — | `dynamic_user_admin_group_detail` |
+| `GET` | `/permissions/` | — | `dynamic_user_admin_permissions_list` |
+
+**v1.1.0 admin/API parity additions**, all above: user create/delete/set-password; profile and
+setting *collections* (`/profiles/`, `/settings/`, keyed by the row's own pk, distinct from the
+existing per-user `/{id}/profile/`/`/{id}/setting/` routes); deletion-request retrieve-by-id,
+create-on-a-user's-behalf, and admin-cancel; a read-only `ChangeLogEntry` audit surface (superuser
+delete only); a read-only surface for Django's own `LogEntry` (present only when
+`django.contrib.admin` is installed); read-only `groups`/`permissions` so a dashboard can populate
+the pickers behind `PATCH /{id}/`'s `groups`/`user_permissions`. Every admin-API write now also
+writes a `LogEntry` row, matching what Django Admin itself already auto-logs.
 
 **The privilege-escalation gate.** `CanEscalatePrivilege` runs only on admin `PATCH /{id}/`, is
 never controlled by `ADMIN_REQUIRES_SUPERUSER`, and inspects the request body for the exact key
@@ -338,9 +411,11 @@ set `{"is_active", "is_staff", "is_superuser", "groups", "user_permissions"}` (t
 `USER_PRIVILEGED_FIELDS` floor above, plus any host additions). If the body touches **any** of
 those keys and `request.user.is_superuser` is not `True`, the entire request is rejected with
 `403` — never a silent per-field drop. `password` is excluded from every serializer this app
-produces or accepts, unconditionally. `POST /deletion-requests/{id}/finalize/` is superuser-only
-**regardless** of `ADMIN_REQUIRES_SUPERUSER` — it bypasses the grace period entirely and is
-genuinely irreversible.
+produces or accepts, unconditionally. `POST /deletion-requests/{id}/finalize/`,
+`DELETE /{id}/`, `POST /{id}/set-password/`, `DELETE /change-log/{id}/`, and
+`DELETE /log-entries/{id}/` are all superuser-only **regardless** of `ADMIN_REQUIRES_SUPERUSER` —
+each is either genuinely irreversible (hard-delete, password takeover) or would let a compromised
+staff account erase the audit trail that would otherwise reveal it.
 
 ## Signals emitted
 
@@ -357,10 +432,14 @@ model.
 | `deletion_reviewed` | `AccountDeletionRequest` | `request_id: int`, `status: str`, `reviewed_by_id: int \| None` |
 | `deletion_finalized` | `AccountDeletionRequest` | `user_id: int` (captured before a `hard_delete` removes the row), `mode: str` |
 | `profile_updated` | resolved Profile model | `user_id: int`, `changed_fields: list[str]` — sent only when at least one field actually changed |
+| `user_created` | resolved user model | `user_id: int` — **v1.1.0.** Unconditional (no `AUTO_CREATE_*`-style guard); connected *last* in `apps.py`'s `ready()`, after both provisioning receivers, so a receiver can rely on Profile/Setting already existing |
+| `user_updated` | resolved user model | `user_id: int`, `changed_fields: list[str]` — **v1.1.0.** Sent by `UserService.update` (`PATCH /me/`, admin `PATCH /{id}/`) |
+| `setting_updated` | resolved Setting model | `user_id: int`, `changed_fields: list[str]` — **v1.1.0.** Setting changes are no longer silent |
+| `user_deleted` | resolved user model | `user_id: int`, `actor_id: int \| None` — **v1.1.0.** Sent by admin `DELETE /{id}/`, superuser-only |
+| `user_password_set` | resolved user model | `user_id: int`, `actor_id: int \| None` — **v1.1.0.** Sent by admin `POST /{id}/set-password/`, superuser-only. Carries no password material |
 
 `profile_created`/`setting_created` only fire when `AUTO_CREATE_PROFILE`/`AUTO_CREATE_SETTING`
 (both default `True`) are enabled and a row was actually created — not on every `get_or_create`.
-Setting changes emit no signal (not yet part of the versioned-contract surface).
 
 Payload changes to any of the above are a **MAJOR** version bump.
 
@@ -378,6 +457,11 @@ model reference is resolved through `resolution.py`/`settings.AUTH_USER_MODEL` a
 | `DeletionService.review` | `(request_id: int, *, approved: bool, reviewed_by: AbstractBaseUser) -> AccountDeletionRequest` | Raises `InvalidDeletionState` unless currently `PENDING`. Rejecting is terminal |
 | `DeletionService.finalize` | `(request_id: int) -> None` | Raises `InvalidDeletionState` unless currently `APPROVED`. Implements `DELETION_MODE`; raises `ImproperlyConfigured` on a misconfigured `"anonymize"` mode rather than falling back |
 | `DeletionService.cancel` | `(user: AbstractBaseUser) -> None` | Raises `InvalidDeletionState` if no `PENDING` request exists. Deletes the row outright — no "cancelled" status |
+| `DeletionService.cancel_by_id` | `(request_id: int) -> None` | **v1.1.0.** Admin-side cancel — accepts `PENDING` *or* `APPROVED` (unlike `.cancel()`) |
+| `UserService.create` | `(*, password: str \| None = None, **fields) -> AbstractBaseUser` | **v1.1.0.** Via `UserManager.create_user` — identity validation/username generation happen once, inside `save()` |
+| `UserService.update` | `(user: AbstractBaseUser, validated_data: dict, *, actor=None) -> AbstractBaseUser` | **v1.1.0.** Sends `user_updated` if anything changed |
+| `UserService.set_password` | `(user: AbstractBaseUser, raw_password: str, *, actor=None) -> None` | **v1.1.0.** Runs `AUTH_PASSWORD_VALIDATORS`; sends `user_password_set` |
+| `UserService.delete` | `(user: AbstractBaseUser, *, actor=None) -> None` | **v1.1.0.** Sends `user_deleted`, `user_id` captured before the delete |
 
 Signature changes to any of the above are a **MAJOR** version bump.
 
@@ -401,7 +485,9 @@ One composable abstract model per mixin. Compose onto your own subclass of `Abst
 `dynamic_user.factories` exports `factory_boy` factories for `User`/`Profile`/`Setting`/
 `AccountDeletionRequest` — this package's public test-only surface. Add `factory-boy` to your own
 test dependency group to use them; this module is never imported by anything under this package's
-own `src/`.
+own `src/`. **v1.1.0:** `UserFactory` carries `phone_only`/`email_only` traits
+(`UserFactory(phone_only=True)`) matching the identity rule — a plain `UserFactory()` still sets
+both `email` and `phone`.
 
 ## Recommended periodic schedule
 
@@ -434,13 +520,14 @@ JAZZMIN_SETTINGS = {
         "dynamic_user.setting": "fas fa-sliders-h",
         "dynamic_user.accountdeletionrequest": "fas fa-user-slash",
         "dynamic_user.changelogentry": "fas fa-history",
+        "admin.logentry": "fas fa-clipboard-list",  # v1.1.0 — LogEntryAdmin, registered by this app
     },
 }
 ```
 
 Re-key these to your own app label if you subclassed the swappable models (e.g.
-`"core.user"` instead of `"dynamic_user.user"`) — `accountdeletionrequest` and
-`changelogentry` stay `dynamic_user.*` either way, since neither is swappable.
+`"core.user"` instead of `"dynamic_user.user"`) — `accountdeletionrequest`, `changelogentry`, and
+`admin.logentry` stay as shown either way, since none of the three is swappable.
 
 ## Installation — frontend
 
@@ -498,21 +585,33 @@ hooks. No further frontend configuration needed.
 
 ```tsx
 import {
-  useMe, useMyProfile, useUpdateMyProfile, useMySetting, useUpdateMySetting,
+  useMe, useUpdateMe, useMyProfile, useUpdateMyProfile, useMySetting, useUpdateMySetting,
   usePublicProfiles, usePublicProfile,
   useMyDeletionRequest, useRequestDeletion, useCancelDeletionRequest,
   dynamicUserKeys,
 } from "@hjtdev/django-dynamic-user";
 ```
 
+`useUpdateMe()` (**v1.1.0**) wraps `PATCH /me/` — `USER_SELF_EDITABLE_FIELDS` (default: just
+`name`).
+
 ### Admin hooks
 
 ```tsx
 import {
-  useAdminUsers, useAdminUser, useUpdateAdminUser,
+  useAdminUsers, useCreateAdminUser, useAdminUser, useUpdateAdminUser, useDeleteAdminUser,
+  useSetAdminUserPassword,
   useAdminUserProfile, useUpdateAdminUserProfile,
   useAdminUserSetting, useUpdateAdminUserSetting,
-  useAdminDeletionRequests, useReviewDeletionRequest, useFinalizeDeletionRequest,
+  useAdminProfiles, useCreateAdminProfile, useAdminProfile, useUpdateAdminProfileById,
+  useDeleteAdminProfile,
+  useAdminSettings, useCreateAdminSetting, useAdminSetting, useUpdateAdminSettingById,
+  useDeleteAdminSetting,
+  useAdminDeletionRequests, useAdminDeletionRequest, useCreateAdminDeletionRequest,
+  useCancelAdminDeletionRequest, useReviewDeletionRequest, useFinalizeDeletionRequest,
+  useAdminChangeLog, useAdminChangeLogEntry, useDeleteAdminChangeLogEntry,
+  useAdminLogEntries, useAdminLogEntry, useDeleteAdminLogEntry,
+  useAdminGroups, useAdminGroup, useAdminPermissions,
   dynamicUserAdminKeys,
 } from "@hjtdev/django-dynamic-user";
 
@@ -523,7 +622,13 @@ function AdminUserRow({ id }: { id: number }) {
 }
 ```
 
-All 20 hooks and both key factories (`dynamicUserKeys`, `dynamicUserAdminKeys`) are exported from
+**v1.1.0 added 26 hooks**, all above — user create/delete/set-password; profile and setting
+*collections* (`useAdminProfiles`/`useAdminProfile`/... — keyed by the row's own pk, distinct
+from the existing per-user `useAdminUserProfile(id)`); deletion-request retrieve/create/cancel;
+read-only change-log, Django `LogEntry`, group, and permission hooks plus the two audit-delete
+mutations.
+
+All 46 hooks and both key factories (`dynamicUserKeys`, `dynamicUserAdminKeys`) are exported from
 the package root — there is no other entrypoint, and no provider export (the host mounts appkit's
 `ApiClientProvider` once, as shown above).
 
@@ -541,7 +646,7 @@ below is current). One remains, kept here as an accurate record rather than a di
    deliberate deviation (Django only auto-discovers models from `models.py`) — flagged here only
    to confirm the register entry is accurate, not to re-litigate it.
 
-No other disagreements were found across the `DYNAMIC_USER` key table (all 20 keys, verified
-against `conf.py DEFAULTS`), the six signal payloads, the seven service signatures, every
-self-service/admin endpoint and its permission classes, all 20 frontend hook names, or the two
-task names/recommended schedule.
+No other disagreements were found across the `DYNAMIC_USER` key table (all 24 keys, verified
+against `conf.py DEFAULTS`), the eleven signal payloads, the twelve service signatures, every
+self-service/admin endpoint and its permission classes, all 46 frontend hook names, or the two
+task names/recommended schedule — verified again for v1.1.0.

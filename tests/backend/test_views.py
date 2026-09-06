@@ -93,10 +93,29 @@ def test_me_returns_200_for_authenticated_user(client: APIClient, user: Any) -> 
     assert "password" not in response.data
 
 
-def test_me_patch_is_not_allowed(client: APIClient) -> None:
-    """No PATCH route exists for ``/me/`` at all (``docs/CONTRACT.md`` §5) —
-    ``RetrieveAPIView`` defines no handler for it."""
-    response = client.patch(reverse("dynamic-user-me"), {"name": "x"}, format="json")
+def test_me_patch_updates_name(client: APIClient, user: object) -> None:
+    """v1.1.0: PATCH /me/ now exists — USER_SELF_EDITABLE_FIELDS (default ["name"]) minus
+    USER_LOCKED_FIELDS, applied via UserService.update. See test_identity.py for the full
+    matrix (locked-field rejection, no-op no-signal, etc.)."""
+    response = client.patch(reverse("dynamic-user-me"), {"name": "New Name"}, format="json")
+    assert response.status_code == 200
+    assert response.data["name"] == "New Name"
+
+
+def test_me_patch_rejects_locked_field(client: APIClient, user: object) -> None:
+    """``email`` is in USER_LOCKED_FIELDS — PATCH /me/'s serializer never includes it, so
+    supplying it is silently ignored (not a 400), matching every other allowlist-editable
+    endpoint's own behavior."""
+    original_email = user.email
+    response = client.patch(reverse("dynamic-user-me"), {"email": "new@example.com"}, format="json")
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert user.email == original_email
+
+
+def test_me_put_is_not_allowed(client: APIClient) -> None:
+    """No full-replace route exists for ``/me/`` — same reasoning as ``MyProfileView``."""
+    response = client.put(reverse("dynamic-user-me"), {"name": "x"}, format="json")
     assert response.status_code == 405
 
 

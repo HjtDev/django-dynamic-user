@@ -1,7 +1,16 @@
 """``UserManager`` — the manager ``AbstractBaseUser`` requires.
 
-Phase 2 implements ``UserManager(BaseUserManager)``: ``create_user(username, email,
-password=None, **extra)`` and ``create_superuser(username, email, password, **extra)``.
+``UserManager(BaseUserManager)``: ``create_user(username=None, email=None, password=None,
+**extra)`` and ``create_superuser(username=None, email=None, password=None, **extra)``.
+
+**v1.1.0 — both ``username`` and ``email`` are optional here**, mirroring
+``AbstractDynamicUser``'s own v1.1.0 change (``models.py``): a caller with only a phone number
+(``extra_fields={"phone": ...}``) can call ``create_user(phone="+1555...")`` with no username and
+no email at all. Every existing call — positional or keyword, both args present — still resolves
+identically; this widens, it does not narrow. All the real enforcement (email-or-phone required,
+username generation) lives in ``AbstractDynamicUser.save()``, not here — this manager is one of
+several callers of that ``save()``, not the only one, since an external auth app's own
+provisioning path (``docs/CONTRACT.md`` §1) never goes through this manager at all.
 
 ``create_superuser`` sets ``is_staff=True, is_superuser=True`` directly — this is the one place
 in the whole package those fields are written outside a superuser-gated HTTP path, and it's safe
@@ -36,21 +45,31 @@ class UserManager(BaseUserManager["AbstractDynamicUser"]):
     use_in_migrations = True
 
     def create_user(
-        self, username: str, email: str, password: str | None = None, **extra_fields: Any
+        self,
+        username: str | None = None,
+        email: str | None = None,
+        password: str | None = None,
+        **extra_fields: Any,
     ) -> AbstractDynamicUser:
-        """Create and save a regular user. ``is_staff``/``is_superuser``/``is_active`` are never
-        accepted here beyond their model defaults — a caller wanting those set uses
-        :meth:`create_superuser` or writes to the row directly outside any HTTP path."""
-        if not username:
-            raise ValueError("The given username must be set.")
-        email = self.normalize_email(email)
-        user = self.model(username=username, email=email, **extra_fields)
+        """Create and save a regular user. ``username``/``email`` are both optional — see this
+        module's docstring — but the email-or-phone rule and username generation are enforced by
+        :meth:`~dynamic_user.models.AbstractDynamicUser.save`, called below, not here.
+        ``is_staff``/``is_superuser``/``is_active`` are never accepted here beyond their model
+        defaults — a caller wanting those set uses :meth:`create_superuser` or writes to the row
+        directly outside any HTTP path."""
+        if email:
+            email = self.normalize_email(email)
+        user = self.model(username=username or "", email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
 
     def create_superuser(
-        self, username: str, email: str, password: str, **extra_fields: Any
+        self,
+        username: str | None = None,
+        email: str | None = None,
+        password: str | None = None,
+        **extra_fields: Any,
     ) -> AbstractDynamicUser:
         """Create and save a superuser. Sets ``is_staff=True, is_superuser=True`` directly —
         see this module's docstring for why that is not a violation of the escalation rail: this

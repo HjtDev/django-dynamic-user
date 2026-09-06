@@ -1,5 +1,9 @@
 import type {
+  AdminChangeLogParams,
   AdminDeletionRequestsParams,
+  AdminLogEntriesParams,
+  AdminProfilesParams,
+  AdminSettingsParams,
   AdminUsersParams,
   PublicProfilesParams,
 } from "../types.js";
@@ -54,4 +58,28 @@ export const dynamicUserAdminKeys = {
       ? ([...dynamicUserAdminKeys.all, "deletion-requests"] as const)
       : ([...dynamicUserAdminKeys.all, "deletion-requests", params] as const),
   deletionRequest: (id: number) => [...dynamicUserAdminKeys.all, "deletion-requests", id] as const,
+  // v1.1.0 additions — same params === undefined convention as every key above.
+  profiles: (params?: AdminProfilesParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "profiles"] as const)
+      : ([...dynamicUserAdminKeys.all, "profiles", params] as const),
+  profile: (profileId: number) => [...dynamicUserAdminKeys.all, "profiles", profileId] as const,
+  settings: (params?: AdminSettingsParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "settings"] as const)
+      : ([...dynamicUserAdminKeys.all, "settings", params] as const),
+  setting: (settingId: number) => [...dynamicUserAdminKeys.all, "settings", settingId] as const,
+  changeLog: (params?: AdminChangeLogParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "change-log"] as const)
+      : ([...dynamicUserAdminKeys.all, "change-log", params] as const),
+  changeLogEntry: (id: number) => [...dynamicUserAdminKeys.all, "change-log", id] as const,
+  logEntries: (params?: AdminLogEntriesParams) =>
+    params === undefined
+      ? ([...dynamicUserAdminKeys.all, "log-entries"] as const)
+      : ([...dynamicUserAdminKeys.all, "log-entries", params] as const),
+  logEntry: (id: number) => [...dynamicUserAdminKeys.all, "log-entries", id] as const,
+  groups: () => [...dynamicUserAdminKeys.all, "groups"] as const,
+  group: (id: number) => [...dynamicUserAdminKeys.all, "groups", id] as const,
+  permissions: () => [...dynamicUserAdminKeys.all, "permissions"] as const,
 };

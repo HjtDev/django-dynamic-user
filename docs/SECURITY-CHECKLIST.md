@@ -45,3 +45,33 @@ description for the full logs this table summarizes.
 
 No unresolved §9/§12 item. One real gap was found (frontend mutation-mount coverage, 5/9 hooks)
 and fixed in this same phase rather than deferred — see `tests/frontend/mutations-do-not-fire-on-mount.test.tsx`.
+
+---
+
+## v1.1.0 walk — new admin/API surface
+
+Re-walked §9/§12 against every endpoint/hook this release added: user create/delete/set-password,
+profile/setting collections, deletion-request detail/create/cancel, change-log, `LogEntry`,
+groups/permissions, and the identity/username-generation model layer. Evidence, not memory:
+
+| Item | Evidence |
+|---|---|
+| No unauthenticated writes on any new route | `test_admin_views_crud.py::test_anonymous_cannot_delete_a_user` — `403`/`not_authenticated`, same envelope as every other route. |
+| **New irreversible actions are superuser-only, always** | `DELETE /{id}/`, `POST /{id}/set-password/`, `DELETE /change-log/{id}/`, `DELETE /log-entries/{id}/` all gate on `IsSuperUser` independent of `ADMIN_REQUIRES_SUPERUSER` — proven by actual attempt, not read from the permission class: `test_staff_admin_cannot_delete_a_user`, `test_staff_admin_cannot_set_a_password`, `test_staff_admin_cannot_delete_a_change_log_entry`, `test_staff_admin_cannot_delete_a_log_entry`, plus `test_delete_user_still_403s_a_staff_admin_under_admin_requires_superuser_true` (proves the floor doesn't move even when the general gate is *already* tightened). |
+| **`POST /` (user create) is escalation-gated, not just admin-gated** | `test_staff_admin_cannot_create_a_superuser` — a staff (non-superuser) admin's body containing `is_superuser: true` is rejected `403`, whole-request, and the row is asserted **not created at all** (not created-then-stripped). `test_superuser_can_create_a_staff_user` proves the same call succeeds for an actual superuser — the guard is selective, not a blanket deny. |
+| `password` still never appears in any read shape, including the new create/list routes | `test_admin_user_list_password_never_appears` (unchanged, re-run fresh), `test_staff_admin_can_create_a_user` asserts `"password" not in response.data` on the `201` body itself. `build_serializer()`'s hard deny-list is unmodified — the new `AdminUserCreateSerializer` subclasses a `build_serializer()` base and adds `password` as a hand-written `write_only` field, never through the factory's own field list. |
+| **A Django-core `ValidationError` (the identity rule) never leaks as a 500** | New failure mode this release introduces: `UserService.create`/`.update`/`.set_password` can raise `django.core.exceptions.ValidationError` from inside `AbstractDynamicUser.save()`. `views.reraise_as_drf_validation_error` translates it to a proper `400` at every one of the three call sites (`AdminUserListView.create`, `AdminUserDetailView.update`, `AdminUserSetPasswordView.post`, plus self-service `MeView.update`) — found and fixed during this release's own test-writing (`test_create_user_with_neither_email_nor_phone_is_400`, `test_set_password_runs_auth_password_validators` both failed with a raw `500` before the fix; both pass now). |
+| `AUTH_PASSWORD_VALIDATORS` genuinely runs on admin-set passwords | `test_set_password_runs_auth_password_validators` — a weak password under an explicit validator config is rejected `400`; `test_superuser_can_set_a_password` proves a real password change round-trips (`check_password` on the refreshed row). |
+| New audit surface can't be tampered with by non-superusers | `ChangeLogEntryAdmin.has_change_permission` → `False` unconditionally; `.has_delete_permission`/`LogEntryAdmin.has_delete_permission` → superuser-only. API side: `DELETE /change-log/{id}/`/`DELETE /log-entries/{id}/` both superuser-gated (see row above). |
+| Admin no longer bypasses the deletion state machine via the raw change form | `AccountDeletionRequestAdmin.readonly_fields` now includes `status`/`user`/`reviewed_by`/`finalize_at` (was only `requested_at`/`reviewed_at`) — a staff user can no longer hand-set `status="approved"` or move `finalize_at` outside `DeletionService`. `has_add_permission → False` closes the same class of bypass for creation. |
+| **Escalation guard re-proven on both settings legs, fresh** | Ephemeral Postgres up, no cached result: `uv run pytest -k "escalat or cannot_create_a_superuser or cannot_delete or cannot_set_a_password or password_never_appears" -v --no-cov` → **16 passed, 1 skipped** (the skip is the swapped-leg twin, correctly deselected under the default settings module — see `test_admin_views_swapped.py`). |
+| Every new admin write is now attributable | `test_admin_api_write_creates_a_log_entry` — an admin-API `PATCH` produces exactly one new `django.contrib.admin.models.LogEntry` row, closing the pre-v1.1.0 gap where only Django-Admin writes were ever logged. `audit.log_admin_action` is a no-op (never raises, never half-writes) when `django.contrib.admin` isn't installed. |
+| No new dependency, no new secret, no new raw SQL | `grep -rn '"__all__"' backend/src` → clean (unchanged). `grep -rn '\.raw(\|RawSQL\|extra(select' backend/src` → clean. `grep -rniE 'SECRET\|API_KEY\|_TOKEN\s*=\|PASSWORD\s*=' backend/src` → only docstring mentions of the `password` parameter name and `secrets.token_hex` (the stdlib module, used for username generation) — no real credential. |
+| `pip-audit` / `npm audit`, re-run for this release | `uvx pip-audit --strict --no-deps -r <(uv export --locked --no-default-groups --all-extras --no-hashes --format requirements-txt | grep -v '^-e ')` → **No known vulnerabilities found**. `npm audit --audit-level=high` → **found 0 vulnerabilities**. |
+| Frontend: no new mutation hook fires on mount | All 14 new mutation hooks added in `mutations-do-not-fire-on-mount.test.tsx` this release (`useUpdateMe`, `useCreateAdminUser`, `useDeleteAdminUser`, `useSetAdminUserPassword`, `useCreateAdminProfile`, `useUpdateAdminProfileById`, `useDeleteAdminProfile`, `useCreateAdminSetting`, `useUpdateAdminSettingById`, `useDeleteAdminSetting`, `useCreateAdminDeletionRequest`, `useCancelAdminDeletionRequest`, `useDeleteAdminChangeLogEntry`, `useDeleteAdminLogEntry`) — each mounts, rerenders twice, flushes a microtask, asserts `isIdle`/zero calls, then `mutate()`s and asserts exactly one call. Full suite: **50 test files, 133 tests passed**, coverage 99.73% statements / 91.66% branches / 100% functions / 100% lines — above the 85% gate on every metric. |
+
+### Outcome (v1.1.0)
+
+No unresolved item. The one genuine defect this walk's own test-writing surfaced — a Django-core
+`ValidationError` reaching the client as an unhandled `500` instead of a `400` — was found and
+fixed in the same pass (`views.reraise_as_drf_validation_error`), not deferred.

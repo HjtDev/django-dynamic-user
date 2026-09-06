@@ -17,7 +17,11 @@ export interface paths {
          */
         get: operations["admin_users_list"];
         put?: never;
-        post?: never;
+        /**
+         * Create a user (admin)
+         * @description v1.1.0. Any user field, plus an optional write-only password (unset -> set_unusable_password()). 403 (whole request rejected) if a non-superuser's body touches is_staff/is_superuser/is_active/groups/user_permissions — the same CanEscalatePrivilege gate PATCH /{id}/ already uses.
+         */
+        post: operations["admin_users_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -38,7 +42,11 @@ export interface paths {
         get: operations["admin_users_retrieve"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a user (admin, superuser-only)
+         * @description v1.1.0. Hard-deletes the user outright, bypassing the account-deletion review flow entirely. Superuser-only, always, regardless of ADMIN_REQUIRES_SUPERUSER — the same floor as POST /deletion-requests/{id}/finalize/, for the same reason: irreversible, and a compromised staff account should never reach it.
+         */
+        delete: operations["admin_users_destroy"];
         options?: never;
         head?: never;
         /**
@@ -72,6 +80,26 @@ export interface paths {
         patch: operations["admin_users_profile_partial_update"];
         trace?: never;
     };
+    "/api/v1/admin/users/{id}/set-password/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a user's password (admin, superuser-only)
+         * @description Runs AUTH_PASSWORD_VALIDATORS; sends user_password_set.
+         */
+        post: operations["admin_users_set_password_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/{id}/setting/": {
         parameters: {
             query?: never;
@@ -96,6 +124,51 @@ export interface paths {
         patch: operations["admin_users_setting_partial_update"];
         trace?: never;
     };
+    "/api/v1/admin/users/change-log/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List change-log entries (admin)
+         * @description v1.1.0. Paginated, filterable list of ChangeLogEntry rows — HistoryMixin's own audit trail, previously readable only through Django Admin's ChangeLogEntryAdmin.
+         */
+        get: operations["admin_users_change_log_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/change-log/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve a change-log entry (admin)
+         * @description v1.1.0. ``GET``/``DELETE`` ``/change-log/{id}/``. No ``PATCH`` — a change-log row is
+         *     write-once, by design (``mixins.HistoryMixin.log_change``), on both interfaces.
+         */
+        get: operations["admin_users_change_log_retrieve"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a change-log entry (admin, superuser-only)
+         * @description v1.1.0. Superuser-only, always — an audit row deleted by anything less is exactly the tampering an audit trail exists to make visible. Matches the tightened ChangeLogEntryAdmin gate (docs/CONTRACT.md §10).
+         */
+        delete: operations["admin_users_change_log_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/deletion-requests/": {
         parameters: {
             query?: never;
@@ -109,8 +182,36 @@ export interface paths {
          */
         get: operations["admin_users_deletion_requests_list"];
         put?: never;
-        post?: never;
+        /**
+         * Create an account-deletion request (admin)
+         * @description v1.1.0. {user, reason}. 409 if the user already has a pending or approved request.
+         */
+        post: operations["admin_users_deletion_requests_create"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/deletion-requests/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve an account-deletion request (admin)
+         * @description v1.1.0. Backs the frontend SDK's previously-unpopulated deletionRequest(id) key.
+         */
+        get: operations["admin_users_deletion_requests_retrieve"];
+        put?: never;
+        post?: never;
+        /**
+         * Cancel an account-deletion request (admin)
+         * @description v1.1.0. DeletionService.cancel_by_id — a PENDING or APPROVED request only. 409 if already REJECTED/FINALIZED.
+         */
+        delete: operations["admin_users_deletion_requests_destroy"];
         options?: never;
         head?: never;
         patch?: never;
@@ -156,6 +257,217 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users/groups/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List groups (admin, read-only)
+         * @description v1.1.0. Read-only — populates the picker behind PATCH /{id}/'s groups field. Full Group CRUD stays django.contrib.auth's own admin surface.
+         */
+        get: operations["admin_users_groups_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/groups/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve a group (admin, read-only)
+         * @description v1.1.0. ``GET /groups/{id}/``.
+         */
+        get: operations["admin_users_groups_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/log-entries/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Django admin-action log entries (admin, read-only)
+         * @description v1.1.0. Django's own django.contrib.admin.models.LogEntry — every write made through Django Admin is auto-logged here already; this is the read side for a custom dashboard. Only registered when django.contrib.admin is installed.
+         */
+        get: operations["admin_users_log_entries_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/log-entries/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve a Django admin-action log entry (admin, read-only)
+         * @description v1.1.0. ``GET``/``DELETE`` ``/log-entries/{id}/``. ``DELETE`` is superuser-only,
+         *     always, matching the equally-tightened ``LogEntryAdmin.has_delete_permission`` —
+         *     deleting an audit row is exactly the tampering an audit trail exists to make visible.
+         */
+        get: operations["admin_users_log_entries_retrieve"];
+        put?: never;
+        post?: never;
+        /**
+         * @description v1.1.0. ``GET``/``DELETE`` ``/log-entries/{id}/``. ``DELETE`` is superuser-only,
+         *     always, matching the equally-tightened ``LogEntryAdmin.has_delete_permission`` —
+         *     deleting an audit row is exactly the tampering an audit trail exists to make visible.
+         */
+        delete: operations["admin_users_log_entries_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/permissions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List permissions (admin, read-only)
+         * @description v1.1.0. Read-only — populates the picker behind PATCH /{id}/'s user_permissions field.
+         */
+        get: operations["admin_users_permissions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/profiles/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List profiles (admin)
+         * @description v1.1.0. Paginated, filterable collection over every Profile row — unlike GET /profiles/ on the self-service surface, not restricted to is_public=True. Any concrete, non-relation field on the resolved Profile model is accepted as an exact-match query filter, the same _filterable_model_fields() reasoning as the user list.
+         */
+        get: operations["admin_users_profiles_list"];
+        put?: never;
+        /**
+         * Create a profile (admin)
+         * @description v1.1.0. Any Profile field, including user (writable here only).
+         */
+        post: operations["admin_users_profiles_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/profiles/{profile_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve a profile (admin)
+         * @description v1.1.0. Keyed by the Profile row's own pk, not the owning user's id.
+         */
+        get: operations["admin_users_profiles_retrieve"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a profile (admin)
+         * @description v1.1.0. Deletes the row outright — Django Admin can already do this.
+         */
+        delete: operations["admin_users_profiles_destroy"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a profile (admin)
+         * @description v1.1.0. Any Profile field, applied via ProfileService.update.
+         */
+        patch: operations["admin_users_profiles_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/admin/users/settings/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List settings (admin)
+         * @description v1.1.0. Same shape as GET /profiles/ (admin collection), for Setting.
+         */
+        get: operations["admin_users_settings_list"];
+        put?: never;
+        /**
+         * Create a setting (admin)
+         * @description v1.1.0. Any Setting field, including user (writable here only).
+         */
+        post: operations["admin_users_settings_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/settings/{setting_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve a setting (admin)
+         * @description v1.1.0. Keyed by the Setting row's own pk, not the owning user's id.
+         */
+        get: operations["admin_users_settings_retrieve"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a setting (admin)
+         * @description v1.1.0. Deletes the row outright — Django Admin can already do this.
+         */
+        delete: operations["admin_users_settings_destroy"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a setting (admin)
+         * @description v1.1.0. Any Setting field, applied via SettingService.update.
+         */
+        patch: operations["admin_users_settings_partial_update"];
+        trace?: never;
+    };
     "/api/v1/users/me/": {
         parameters: {
             query?: never;
@@ -173,7 +485,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update my account info
+         * @description v1.1.0. USER_SELF_EDITABLE_FIELDS minus USER_LOCKED_FIELDS, applied via UserService.update — deliberately name-only by default; see get_user_self_editable_serializer()'s own docstring for why.
+         */
+        patch: operations["users_me_partial_update"];
         trace?: never;
     };
     "/api/v1/users/me/deletion-request/": {
@@ -297,6 +613,30 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * @description * `1` - Addition
+         *     * `2` - Change
+         *     * `3` - Deletion
+         * @enum {integer}
+         */
+        ActionFlagEnum: 1 | 2 | 3;
+        /**
+         * @description v1.1.0. ``ChangeLogEntry`` (this app's own audit-log model, concrete/not swappable — see
+         *     ``models.py``'s docstring), entirely read-only — ``GET /change-log/``,
+         *     ``GET /change-log/{id}/``.
+         */
+        AdminChangeLogEntry: {
+            readonly id: number;
+            readonly content_type: number;
+            readonly object_id: number;
+            /** @description The user who made this change, if known. */
+            readonly actor: number | null;
+            readonly field_name: string;
+            readonly old_value: string;
+            readonly new_value: string;
+            /** Format: date-time */
+            readonly changed_at: string;
+        };
+        /**
          * @description ``GET /deletion-requests/``, and the response body of the review/finalize actions —
          *     entirely read-only. Unlike the self-service :class:`DeletionRequestSerializer`, this one
          *     includes ``user`` and ``reviewed_by`` — an admin reviewing a queue of everyone's requests
@@ -318,6 +658,43 @@ export interface components {
             /** Format: date-time */
             readonly finalize_at: string | null;
         };
+        AdminDeletionRequestCreateRequest: {
+            user: number;
+            /** @default  */
+            reason: string;
+        };
+        /**
+         * @description v1.1.0. Read-only — ``GET /groups/``, ``GET /groups/{id}/``, so a dashboard can populate
+         *     the picker behind ``PATCH /{id}/``'s ``groups`` field. ``Group``/``Permission`` are Django's
+         *     own ``django.contrib.auth`` models, never swappable, always installed (this whole package
+         *     already depends on ``django.contrib.auth`` — this is not a new dependency).
+         */
+        AdminGroup: {
+            readonly id: number;
+            readonly name: string;
+            readonly permissions: number[];
+        };
+        AdminLogEntry: {
+            readonly id: number;
+            /** Format: date-time */
+            readonly action_time: string;
+            readonly user: number;
+            readonly content_type: number | null;
+            readonly object_id: string | null;
+            readonly object_repr: string;
+            readonly action_flag: components["schemas"]["ActionFlagEnum"];
+            readonly change_message: string;
+        };
+        /**
+         * @description v1.1.0. Read-only — ``GET /permissions/``, so a dashboard can populate the picker behind
+         *     ``PATCH /{id}/``'s ``user_permissions`` field.
+         */
+        AdminPermission: {
+            readonly id: number;
+            readonly name: string;
+            readonly codename: string;
+            readonly content_type: number;
+        };
         AdminProfile: {
             readonly id: number;
             readonly user: number;
@@ -328,9 +705,35 @@ export interface components {
              */
             is_public?: boolean;
         };
+        AdminProfileCreateRequest: {
+            user: number;
+            bio?: string;
+            /**
+             * Public
+             * @description Whether this profile is visible to other users.
+             */
+            is_public?: boolean;
+        };
+        /**
+         * @description v1.1.0. ``POST /{id}/set-password/``'s request body — the only field a caller may supply.
+         *     Not a ``ModelSerializer``: the actual write goes through
+         *     :meth:`~dynamic_user.services.UserService.set_password`, which runs
+         *     ``AUTH_PASSWORD_VALIDATORS`` itself; this serializer only proves a ``password`` string was
+         *     given at all.
+         */
+        AdminSetPasswordRequest: {
+            password: string;
+        };
         AdminSetting: {
             readonly id: number;
             readonly user: number;
+            language?: string;
+            timezone?: string;
+            /** @description Whether this user receives notifications. */
+            notifications_enabled?: boolean;
+        };
+        AdminSettingCreateRequest: {
+            user: number;
             language?: string;
             timezone?: string;
             /** @description Whether this user receives notifications. */
@@ -345,13 +748,10 @@ export interface components {
              * @description Designates that this user has all permissions without explicitly assigning them.
              */
             is_superuser?: boolean;
-            username: string;
+            username?: string;
             name?: string;
-            /**
-             * Email address
-             * Format: email
-             */
-            email: string;
+            /** Email address */
+            email?: (string) | null;
             /** Phone number */
             phone?: string | null;
             /**
@@ -366,6 +766,35 @@ export interface components {
             is_staff?: boolean;
             /** Format: date-time */
             readonly date_joined: string;
+            /** @description The groups this user belongs to. A user will get all permissions granted to each of their groups. */
+            groups?: number[];
+            /** @description Specific permissions for this user. */
+            user_permissions?: number[];
+        };
+        AdminUserCreateRequest: {
+            /** Format: date-time */
+            last_login?: string | null;
+            /**
+             * Superuser status
+             * @description Designates that this user has all permissions without explicitly assigning them.
+             */
+            is_superuser?: boolean;
+            username?: string;
+            name?: string;
+            /** Email address */
+            email?: (string) | null;
+            /** Phone number */
+            phone?: string | null;
+            /**
+             * Active
+             * @description Designates whether this user should be treated as active. Unselect this instead of deleting accounts.
+             */
+            is_active?: boolean;
+            /**
+             * Staff status
+             * @description Designates whether the user can log into this admin site.
+             */
+            is_staff?: boolean;
             /** @description The groups this user belongs to. A user will get all permissions granted to each of their groups. */
             groups?: number[];
             /** @description Specific permissions for this user. */
@@ -434,7 +863,7 @@ export interface components {
              * Email address
              * Format: email
              */
-            readonly email: string;
+            readonly email: string | null;
             /** Phone number */
             readonly phone: string | null;
             /**
@@ -444,6 +873,21 @@ export interface components {
             readonly is_active: boolean;
             /** Format: date-time */
             readonly date_joined: string;
+        };
+        PaginatedAdminChangeLogEntryList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["AdminChangeLogEntry"][];
         };
         PaginatedAdminDeletionRequestList: {
             /** @example 123 */
@@ -459,6 +903,81 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["AdminDeletionRequest"][];
+        };
+        PaginatedAdminGroupList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["AdminGroup"][];
+        };
+        PaginatedAdminLogEntryList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["AdminLogEntry"][];
+        };
+        PaginatedAdminPermissionList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["AdminPermission"][];
+        };
+        PaginatedAdminProfileList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["AdminProfile"][];
+        };
+        PaginatedAdminSettingList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["AdminSetting"][];
         };
         PaginatedAdminUserList: {
             /** @example 123 */
@@ -514,11 +1033,8 @@ export interface components {
             is_superuser?: boolean;
             username?: string;
             name?: string;
-            /**
-             * Email address
-             * Format: email
-             */
-            email?: string;
+            /** Email address */
+            email?: (string) | null;
             /** Phone number */
             phone?: string | null;
             /**
@@ -549,6 +1065,9 @@ export interface components {
             timezone?: string;
             /** @description Whether this user receives notifications. */
             notifications_enabled?: boolean;
+        };
+        PatchedMeUserUpdateRequest: {
+            name?: string;
         };
         PublicProfile: {
             readonly id: number;
@@ -600,6 +1119,31 @@ export interface operations {
             };
         };
     };
+    admin_users_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AdminUserCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["AdminUserCreateRequest"];
+                "multipart/form-data": components["schemas"]["AdminUserCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUser"];
+                };
+            };
+        };
+    };
     admin_users_retrieve: {
         parameters: {
             query?: never;
@@ -618,6 +1162,26 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AdminUser"];
                 };
+            };
+        };
+    };
+    admin_users_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -696,6 +1260,32 @@ export interface operations {
             };
         };
     };
+    admin_users_set_password_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSetPasswordRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["AdminSetPasswordRequest"];
+                "multipart/form-data": components["schemas"]["AdminSetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     admin_users_setting_retrieve: {
         parameters: {
             query?: never;
@@ -744,6 +1334,71 @@ export interface operations {
             };
         };
     };
+    admin_users_change_log_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedAdminChangeLogEntryList"];
+                };
+            };
+        };
+    };
+    admin_users_change_log_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminChangeLogEntry"];
+                };
+            };
+        };
+    };
+    admin_users_change_log_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     admin_users_deletion_requests_list: {
         parameters: {
             query?: {
@@ -767,6 +1422,72 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PaginatedAdminDeletionRequestList"];
                 };
+            };
+        };
+    };
+    admin_users_deletion_requests_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminDeletionRequestCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["AdminDeletionRequestCreateRequest"];
+                "multipart/form-data": components["schemas"]["AdminDeletionRequestCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminDeletionRequest"];
+                };
+            };
+        };
+    };
+    admin_users_deletion_requests_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminDeletionRequest"];
+                };
+            };
+        };
+    };
+    admin_users_deletion_requests_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -817,6 +1538,374 @@ export interface operations {
             };
         };
     };
+    admin_users_groups_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedAdminGroupList"];
+                };
+            };
+        };
+    };
+    admin_users_groups_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGroup"];
+                };
+            };
+        };
+    };
+    admin_users_log_entries_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedAdminLogEntryList"];
+                };
+            };
+        };
+    };
+    admin_users_log_entries_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLogEntry"];
+                };
+            };
+        };
+    };
+    admin_users_log_entries_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    admin_users_permissions_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedAdminPermissionList"];
+                };
+            };
+        };
+    };
+    admin_users_profiles_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedAdminProfileList"];
+                };
+            };
+        };
+    };
+    admin_users_profiles_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminProfileCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["AdminProfileCreateRequest"];
+                "multipart/form-data": components["schemas"]["AdminProfileCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminProfile"];
+                };
+            };
+        };
+    };
+    admin_users_profiles_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminProfile"];
+                };
+            };
+        };
+    };
+    admin_users_profiles_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    admin_users_profiles_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedAdminProfileRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedAdminProfileRequest"];
+                "multipart/form-data": components["schemas"]["PatchedAdminProfileRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminProfile"];
+                };
+            };
+        };
+    };
+    admin_users_settings_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedAdminSettingList"];
+                };
+            };
+        };
+    };
+    admin_users_settings_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSettingCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["AdminSettingCreateRequest"];
+                "multipart/form-data": components["schemas"]["AdminSettingCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSetting"];
+                };
+            };
+        };
+    };
+    admin_users_settings_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setting_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSetting"];
+                };
+            };
+        };
+    };
+    admin_users_settings_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setting_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    admin_users_settings_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setting_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedAdminSettingRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedAdminSettingRequest"];
+                "multipart/form-data": components["schemas"]["PatchedAdminSettingRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSetting"];
+                };
+            };
+        };
+    };
     users_me_retrieve: {
         parameters: {
             query?: never;
@@ -825,6 +1914,31 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeUser"];
+                };
+            };
+        };
+    };
+    users_me_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedMeUserUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedMeUserUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedMeUserUpdateRequest"];
+            };
+        };
         responses: {
             200: {
                 headers: {

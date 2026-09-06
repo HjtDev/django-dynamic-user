@@ -3,8 +3,9 @@
 # Docker and uv. Mirrors ../appkit's and ../cleanup_app's Makefiles. See CLAUDE.md's Commands
 # block for the equivalent raw commands.
 
-.PHONY: test test-swapped test-bare lint typecheck frontend-check check sync-readmes docs-link \
-	messages compilemessages playground-up playground-down playground-logs playground-reset
+.PHONY: test test-swapped test-partial-swap test-user-swap test-bare lint typecheck \
+	frontend-check check sync-readmes docs-link messages compilemessages playground-up \
+	playground-down playground-logs playground-reset
 
 # The authoritative gate — celery extra installed, >=85% coverage (this repo's CLAUDE.md
 # Commands table). Port 55434, not cleanup_app's 55433 — the two ephemeral Postgres instances
@@ -33,6 +34,27 @@ test-swapped:
 	POSTGRES_HOST=localhost POSTGRES_PORT=55434 \
 	POSTGRES_DB=test_dynamic_user POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres \
 	DJANGO_SETTINGS_MODULE=tests.backend.settings_swapped uv run --extra celery pytest -k swapped --no-cov)
+
+# v1.1.0: the two narrower swap legs (docs/CONTRACT.md §10 item 14's proof that Profile/Setting
+# swapping independently of the user model, and vice versa, never hits a CircularDependencyError)
+# had no Makefile target before this — `make check` ran neither, so a regression in either leg
+# was only ever caught by a developer remembering the raw command. Same reasoning/shape as
+# test-swapped above, each narrowed to its own settings module and `-k` filter.
+test-partial-swap:
+	docker compose -f docker-compose.test.yml up -d --wait
+	trap 'docker compose -f docker-compose.test.yml down' EXIT; \
+	(cd backend && \
+	POSTGRES_HOST=localhost POSTGRES_PORT=55434 \
+	POSTGRES_DB=test_dynamic_user POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres \
+	DJANGO_SETTINGS_MODULE=tests.backend.settings_partial_swap uv run --extra celery pytest -k partial_swap --no-cov)
+
+test-user-swap:
+	docker compose -f docker-compose.test.yml up -d --wait
+	trap 'docker compose -f docker-compose.test.yml down' EXIT; \
+	(cd backend && \
+	POSTGRES_HOST=localhost POSTGRES_PORT=55434 \
+	POSTGRES_DB=test_dynamic_user POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres \
+	DJANGO_SETTINGS_MODULE=tests.backend.settings_user_swap uv run --extra celery pytest -k user_swap --no-cov)
 
 # The bare-install leg — no celery extra, no avatar extra, proves the core stands alone.
 # `--exact` matters: it removes celery/django-celery-beat/appkit[images] if a prior `make test`
@@ -74,7 +96,7 @@ frontend-check:
 	cd frontend && npm run build
 	cd frontend && npm audit --audit-level=high
 
-check: test lint typecheck test-bare frontend-check
+check: test test-swapped test-partial-swap test-user-swap lint typecheck test-bare frontend-check
 
 # The root README.md is the single hand-maintained source; backend/README.md and
 # frontend/README.md are committed, generated copies — PyPI and npm each read a package's
